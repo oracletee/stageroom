@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Camera Test</title>
+</head>
+<body>
+    <h1>Camera/Microphone Test</h1>
+    <video id="video" width="640" height="480" autoplay></video>
+    <br>
+    <button id="start">Start Camera</button>
+    <button id="stop">Stop Camera</button>
+    <div id="status"></div>
+    <div id="devices"></div>
+    
+    <script>
+        const video = document.getElementById('video');
+        const startButton = document.getElementById('start');
+        const stopButton = document.getElementById('stop');
+        const statusDiv = document.getElementById('status');
+        const devicesDiv = document.getElementById('devices');
+        let stream = null;
+        
+        // List devices
+        async function listDevices() {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(d => d.kind === 'videoinput');
+                const audioDevices = devices.filter(d => d.kind === 'audioinput');
+                
+                devicesDiv.innerHTML = `
+                    <h2>Available Devices:</h2>
+                    <h3>Video Devices:</h3>
+                    <ul>${videoDevices.map(d => `<li>${d.label || 'Unnamed'} (${d.deviceId})</li>`).join('')}</ul>
+                    <h3>Audio Devices:</h3>
+                    <ul>${audioDevices.map(d => `<li>${d.label || 'Unnamed'} (${d.deviceId})</li>`).join('')}</ul>
+                `;
+            } catch (err) {
+                devicesDiv.innerHTML = `<p>Error enumerating devices: ${err}</p>`;
+            }
+        }
+        
+        // Start camera
+        startButton.onclick = async () => {
+            try {
+                statusDiv.textContent = 'Requesting access...';
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: true, 
+                    audio: true 
+                });
+                video.srcObject = stream;
+                statusDiv.textContent = 'Success! Camera and microphone are working.';
+                startButton.disabled = true;
+                stopButton.disabled = false;
+            } catch (err) {
+                statusDiv.textContent = `Error: ${err.name} - ${err.message}`;
+                console.error(err);
+            }
+        };
+        
+        // Stop camera
+        stopButton.onclick = () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+                statusDiv.textContent = 'Stopped.';
+                startButton.disabled = false;
+                stopButton.disabled = true;
+            }
+        };
+        
+        // Initialize
+        listDevices();
+    </script>
+</body>
+</html>
