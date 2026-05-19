@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
 export type StageMode = 'ted-talk' | 'podcast' | 'event' | 'worship' | 'classroom' | 'debate' | 'film-premiere';
-export type AppView = 'host' | 'viewer' | 'dashboard';
+export type AppView = 'host' | 'viewer' | 'dashboard' | 'events';
 
 interface SourceItem {
   id: string;

@@ -4,6 +4,8 @@ export interface User {
   email: string;
   name: string | null;
   role: string;
+  password_hash: string | null;
+  password_salt: string | null;
   created_at: string;
 }
 
@@ -22,7 +24,41 @@ export interface Event {
   qr_code_url: string | null;
   livekit_room: string | null;
   stream_url: string | null;
+  category: string | null;
+  poster_url: string | null;
   created_at: string;
+  updated_at: string;
+}
+
+export interface DonationType {
+  id: string;
+  event_id: string;
+  name: string;
+  preset_amounts: string | null;
+  custom_amount_enabled: number;
+  currency: string;
+  created_at: string;
+}
+
+export interface TicketType {
+  id: string;
+  event_id: string;
+  name: string;
+  type: string;
+  price: number;
+  currency: string;
+  max_quantity: number | null;
+  sold_count: number;
+  created_at: string;
+}
+
+export interface UserSettings {
+  id: string;
+  user_id: string;
+  paystack_secret_key: string | null;
+  paystack_public_key: string | null;
+  stripe_secret_key: string | null;
+  stripe_publishable_key: string | null;
   updated_at: string;
 }
 

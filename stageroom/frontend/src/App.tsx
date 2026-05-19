@@ -5,80 +5,66 @@ import { SourcesPanel } from './components/sources/SourcesPanel';
 import { Backstage } from './components/guests/Backstage';
 import { AudioMixer } from './components/audio/AudioMixer';
 import { UnifiedChat } from './components/chat/UnifiedChat';
-import { lazy, Suspense, useState, useEffect } from 'react';
-import { SignIn, SignUp, UserButton, useAuth } from '@clerk/clerk-react';
-
-const AnalyticsDashboard = lazy(() => import('./components/analytics/AnalyticsDashboard').then(m => ({ default: m.AnalyticsDashboard })));
-const TeamCollaboration = lazy(() => import('./components/team/TeamCollaboration').then(m => ({ default: m.TeamCollaboration })));
+import { useState, useEffect } from 'react';
 import { RecordingLibrary } from './components/recording/RecordingLibrary';
 import { AudienceGrid } from './components/audience/AudienceGrid';
 import { ViewerPage } from './components/audience/ViewerPage';
 import { LiveKitProvider } from './components/stage/LiveKitProvider';
 import { useStreamStore } from './hooks/useStreamStore';
-import { EventCreator } from './components/events/EventCreator';
+import { useAuthStore } from './hooks/useAuthStore';
+import { AuthPage } from './components/auth/AuthPage';
+import { EventForm } from './components/events/EventForm';
 import { EventList } from './components/events/EventList';
 import { EventDetail } from './components/events/EventDetail';
 import { GuestRegistration } from './components/guests/GuestRegistration';
-import { DonationFlow } from './components/donations/DonationFlow';
+import { AnalyticsDashboard } from './components/analytics/AnalyticsDashboard';
+import { DashboardView } from './components/dashboard/DashboardView';
+import { TeamCollaboration } from './components/team/TeamCollaboration';
+import { SetupModal } from './components/events/SetupModal';
+import { ShareModal } from './components/events/ShareModal';
 
-type Page = 'studio' | 'viewer' | 'dashboard' | 'events' | 'create-event' | 'event-detail' | 'guest-register' | 'donate' | 'auth';
+interface EventData {
+  id: string;
+  title: string;
+  description: string | null;
+  start_time: string;
+  end_time: string | null;
+  status: string;
+  ticket_type: string;
+  ticket_price: number;
+  currency: string;
+  category: string | null;
+  poster_url: string | null;
+  qr_code_url: string | null;
+}
 
 function AppContent() {
-  const { isLoaded, isSignedIn } = useAuth();
-  const { appView, setAppView } = useStreamStore();
-  const [page, setPage] = useState<Page>('studio');
+  const { user, loading, checkAuth, logout } = useAuthStore();
+  const { appView, setAppView, stageMode, setStageMode } = useStreamStore();
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [guestEventId, setGuestEventId] = useState<string | null>(null);
-  const [authMode, setAuthMode] = useState<'signIn' | 'signUp'>('signIn');
+  const [showCreateEvent, setShowCreateEvent] = useState(false);
+  const [showSetupModal, setShowSetupModal] = useState(false);
+  const [shareEvent, setShareEvent] = useState<{ title: string; url: string } | null>(null);
+  const [initialized, setInitialized] = useState(false);
+
+  useEffect(() => {
+    checkAuth().then(() => setInitialized(true));
+  }, []);
 
   useEffect(() => {
     const hash = window.location.hash.slice(1);
     if (hash.startsWith('/watch/')) {
-      const code = hash.replace('/watch/', '');
-      setPage('viewer');
       setAppView('viewer');
       return;
     }
     if (hash.startsWith('/guest/')) {
       setGuestEventId(hash.replace('/guest/', ''));
-      setPage('guest-register');
-      return;
-    }
-    if (hash.startsWith('/events/new')) {
-      setPage('create-event');
-      return;
-    }
-    if (hash.startsWith('/events/')) {
-      setSelectedEventId(hash.replace('/events/', ''));
-      setPage('event-detail');
-      return;
-    }
-    if (hash === '/events') {
-      setPage('events');
-      return;
-    }
-    if (hash === '/donate') {
-      setPage('donate');
-      return;
-    }
-    if (hash === '/auth') {
-      setPage('auth');
-      setAuthMode(window.location.hash.includes('signUp=true') ? 'signUp' : 'signIn');
       return;
     }
   }, []);
 
-  const navigate = (newPage: Page) => {
-    setPage(newPage);
-    if (newPage === 'events') window.location.hash = '/events';
-    else if (newPage === 'create-event') window.location.hash = '/events/new';
-    else if (newPage === 'event-detail' && selectedEventId) window.location.hash = `/events/${selectedEventId}`;
-    else if (newPage === 'studio') { window.location.hash = ''; setAppView('host'); }
-    else if (newPage === 'dashboard') { window.location.hash = ''; setAppView('dashboard'); }
-    else if (newPage === 'viewer') { window.location.hash = ''; setAppView('viewer'); }
-  };
-
-  if (!isLoaded) {
+  if (!initialized || loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-900">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
@@ -86,40 +72,11 @@ function AppContent() {
     );
   }
 
-  if (!isSignedIn && page !== 'guest-register' && page !== 'viewer') {
-    return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
-        <div className="w-full max-w-md">
-          <h1 className="text-3xl font-bold text-white text-center mb-8">Stageroom</h1>
-          <div className="bg-gray-800 rounded-lg p-6">
-            {authMode === 'signUp' ? (
-              <SignUp
-                signInUrl="/#/auth"
-                appearance={{
-                  elements: {
-                    rootBox: 'w-full',
-                    card: 'shadow-none bg-transparent',
-                  },
-                }}
-              />
-            ) : (
-              <SignIn
-                signUpUrl="/#/auth?signUp=true"
-                appearance={{
-                  elements: {
-                    rootBox: 'w-full',
-                    card: 'shadow-none bg-transparent',
-                  },
-                }}
-              />
-            )}
-          </div>
-        </div>
-      </div>
-    );
+  if (!user && appView !== 'viewer' && !guestEventId) {
+    return <AuthPage />;
   }
 
-  if (page === 'guest-register' && guestEventId) {
+  if (guestEventId && appView !== 'viewer') {
     return (
       <div className="min-h-screen bg-gray-100">
         <header className="bg-white border-b py-4 px-6">
@@ -127,9 +84,8 @@ function AppContent() {
         </header>
         <GuestRegistration
           eventId={guestEventId}
-          onSuccess={(guest) => {
+          onSuccess={() => {
             window.location.hash = `/watch/${guestEventId}`;
-            setPage('viewer');
             setAppView('viewer');
           }}
         />
@@ -137,7 +93,7 @@ function AppContent() {
     );
   }
 
-  if (page === 'viewer' || appView === 'viewer') {
+  if (appView === 'viewer') {
     return (
       <Layout>
         <ViewerPage />
@@ -145,91 +101,72 @@ function AppContent() {
     );
   }
 
-  if (page === 'create-event') {
-    return (
-      <div className="min-h-screen bg-gray-100">
-        <header className="bg-white border-b py-4 px-6 flex items-center justify-between">
-          <h1 className="text-xl font-bold">Stageroom</h1>
-          <div className="flex items-center gap-4">
-            <button onClick={() => navigate('events')} className="text-sm text-blue-600 hover:underline">
-              ← Back to Events
-            </button>
-            <UserButton />
-          </div>
-        </header>
-        <EventCreator
-          onSuccess={() => navigate('events')}
-          onCancel={() => navigate('events')}
-        />
-      </div>
-    );
-  }
-
-  if (page === 'event-detail' && selectedEventId) {
-    return (
-      <div className="min-h-screen bg-gray-100">
-        <header className="bg-white border-b py-4 px-6 flex items-center justify-between">
-          <h1 className="text-xl font-bold">Stageroom</h1>
-          <div className="flex items-center gap-4">
-            <button onClick={() => navigate('events')} className="text-sm text-blue-600 hover:underline">
-              ← Back to Events
-            </button>
-            <UserButton />
-          </div>
-        </header>
-        <EventDetail
-          eventId={selectedEventId}
-          onBack={() => navigate('events')}
-        />
-      </div>
-    );
-  }
-
-  if (page === 'events') {
-    return (
-      <div className="min-h-screen bg-gray-100">
-        <header className="bg-white border-b py-4 px-6 flex items-center justify-between">
-          <h1 className="text-xl font-bold">Stageroom</h1>
-          <div className="flex items-center gap-4">
-            <button onClick={() => navigate('studio')} className="text-sm text-blue-600 hover:underline">
-              Go to Studio
-            </button>
-            <button
-              onClick={() => navigate('create-event')}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
-            >
-              + New Event
-            </button>
-            <UserButton />
-          </div>
-        </header>
-        <EventList onSelectEvent={(event) => {
-          setSelectedEventId(event.id);
-          navigate('event-detail');
-        }} />
-      </div>
-    );
-  }
-
-  if (page === 'dashboard') {
+  if (appView === 'events') {
     return (
       <Layout>
-        <Suspense fallback={
-          <div className="flex items-center justify-center min-h-[400px]">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
+        {showCreateEvent ? (
+          <div className="max-w-2xl mx-auto p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-white">Create Scheduled Event</h2>
+              <button onClick={() => setShowCreateEvent(false)} className="text-sm text-blue-400 hover:underline">
+                ← Back to Events
+              </button>
+            </div>
+            <EventForm
+              onSuccess={() => setShowCreateEvent(false)}
+              onCancel={() => setShowCreateEvent(false)}
+            />
           </div>
-        }>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <AnalyticsDashboard />
-            <TeamCollaboration />
+        ) : selectedEventId ? (
+          <EventDetail
+            eventId={selectedEventId}
+            onBack={() => setSelectedEventId(null)}
+            onShare={(event: EventData) => setShareEvent({ title: event.title, url: event.qr_code_url || '' })}
+          />
+        ) : (
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-white">My Events</h2>
+              <button
+                onClick={() => setShowCreateEvent(true)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+              >
+                + New Event
+              </button>
+            </div>
+            <EventList
+              onSelectEvent={(event) => setSelectedEventId(event.id)}
+              onDeleteEvent={async (id) => {
+                if (!confirm('Delete this event?')) return;
+                try {
+                  const token = useAuthStore.getState().token;
+                  await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/events/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                  });
+                  window.location.reload();
+                } catch (err) {
+                  console.error(err);
+                }
+              }}
+              onShareEvent={(event) => setShareEvent({ title: event.title, url: event.qr_code_url || '' })}
+            />
           </div>
-        </Suspense>
+        )}
+      </Layout>
+    );
+  }
+
+  if (appView === 'dashboard') {
+    return (
+      <Layout>
+        <DashboardView />
       </Layout>
     );
   }
 
   return (
-    <Layout>
+    <Layout onSetup={() => setShowSetupModal(true)}>
       <div className="flex flex-col gap-4">
         <VideoPreview />
         <div className="flex flex-col lg:flex-row gap-4">
@@ -251,6 +188,25 @@ function AppContent() {
           </div>
         </div>
       </div>
+
+      <SetupModal
+        isOpen={showSetupModal}
+        onClose={() => setShowSetupModal(false)}
+        onSuccess={(data) => {
+          setStageMode(data.event.category || stageMode);
+          setShareEvent({ title: data.event.title, url: data.qr_url });
+          setShowSetupModal(false);
+        }}
+      />
+
+      {shareEvent && (
+        <ShareModal
+          isOpen={!!shareEvent}
+          onClose={() => setShareEvent(null)}
+          eventTitle={shareEvent.title}
+          shareUrl={shareEvent.url}
+        />
+      )}
     </Layout>
   );
 }

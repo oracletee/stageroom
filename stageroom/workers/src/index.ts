@@ -3,11 +3,15 @@ import { runMigrations } from './db/migrations';
 import { createEvent, getEvent, listEvents, updateEvent, deleteEvent, getDonationConfig, createDonationConfig, updateDonationConfig } from './db/events';
 import { createTicket, getTicket, listEventTickets, confirmTicket, countEventTickets } from './db/tickets';
 import { createDonation, getDonation, listEventDonations, sumEventDonations, getDonationStats } from './db/donations';
+import { createDonationType, listEventDonationTypes, updateDonationType, deleteDonationType } from './db/donationTypes';
+import { createTicketType, listEventTicketTypes, updateTicketType, deleteTicketType } from './db/ticketTypes';
+import { getUserSettings, upsertUserSettings } from './db/userSettings';
 import { registerGuest, getGuest, getGuestByAccessCode, getGuestByEmail, listEventGuests, markGuestJoined, countEventGuests } from './db/guests';
 import { createPayment, getPayment, getPaymentByProviderId, updatePaymentStatus, listEventPayments, sumEventRevenue } from './db/payments';
-import { verifyClerkToken, syncUserToDB, getUserByClerkId, getClerkAuthHeader } from './auth/clerk';
+import { signUp, signIn, authenticateRequest } from './auth/local';
 import { generateLiveKitToken } from './livekit/token';
 import { initializePaystackPayment, verifyPaystackPayment } from './payments/paystack';
+import { uploadPoster } from './storage/poster';
 import { createLiveInput, listLiveInputs, getLiveInput, deleteLiveInput } from './stream/index';
 import { YouTubeService } from './platforms/youtube/index';
 import { TwitchService } from './platforms/twitch/index';
@@ -38,8 +42,8 @@ export default {
         return jsonResponse({ success }, 200, corsHeaders);
       }
 
-      if (path.startsWith('/api/auth/clerk-webhook')) {
-        return handleClerkAuth(request, env, corsHeaders);
+      if (path.startsWith('/api/auth')) {
+        return handleAuth(request, env, corsHeaders);
       }
 
       if (path.startsWith('/api/events')) {
@@ -64,6 +68,10 @@ export default {
 
       if (path.startsWith('/api/livekit/token')) {
         return handleLiveKitToken(request, env, corsHeaders);
+      }
+
+      if (path.startsWith('/api/settings')) {
+        return handleSettings(request, env, corsHeaders);
       }
 
       if (path.startsWith('/api/stream/live-input')) {
@@ -106,41 +114,54 @@ function jsonResponse(data: any, status: number, headers: Record<string, string>
   });
 }
 
-function requireAuth(request: Request, env: Env): Promise<{ userId: string; email: string; name?: string } | null> {
-  const token = getClerkAuthHeader(request);
-  if (!token) return Promise.resolve(null);
-  return verifyClerkToken(env, token);
+async function requireAuth(request: Request, env: Env): Promise<User | null> {
+  return await authenticateRequest(request, env.DB, env.JWT_SECRET);
 }
 
-async function handleClerkAuth(request: Request, env: Env, corsHeaders: Record<string, string>): Promise<Response> {
+async function handleAuth(request: Request, env: Env, corsHeaders: Record<string, string>): Promise<Response> {
   const path = new URL(request.url).pathname;
 
-  if (path === '/api/auth/clerk-webhook' && request.method === 'POST') {
+  if (path === '/api/auth/sign-up' && request.method === 'POST') {
     const body = await request.json();
-
-    if (body.type === 'user.created' || body.type === 'user.updated') {
-      const clerkData = {
-        userId: body.data.id,
-        email: body.data.email_addresses?.[0]?.email_address || '',
-        name: `${body.data.first_name || ''} ${body.data.last_name || ''}`.trim() || undefined,
-      };
-
-      await syncUserToDB(env.DB, clerkData);
-      return jsonResponse({ success: true }, 200, corsHeaders);
+    if (!body.email || !body.password) {
+      return jsonResponse({ error: 'Missing email or password' }, 400, corsHeaders);
     }
 
-    return jsonResponse({ success: true }, 200, corsHeaders);
+    const result = await signUp(env.DB, env.JWT_SECRET, {
+      email: body.email,
+      password: body.password,
+      name: body.name,
+    });
+
+    if ('error' in result) {
+      return jsonResponse({ error: result.error }, 400, corsHeaders);
+    }
+
+    return jsonResponse({ user: result.user, token: result.token }, 201, corsHeaders);
   }
 
-  if (path === '/api/auth/clerk/verify' && request.method === 'POST') {
-    const { token } = await request.json();
-    if (!token) return jsonResponse({ error: 'Missing token' }, 400, corsHeaders);
+  if (path === '/api/auth/sign-in' && request.method === 'POST') {
+    const body = await request.json();
+    if (!body.email || !body.password) {
+      return jsonResponse({ error: 'Missing email or password' }, 400, corsHeaders);
+    }
 
-    const user = await verifyClerkToken(env, token);
-    if (!user) return jsonResponse({ error: 'Invalid token' }, 401, corsHeaders);
+    const result = await signIn(env.DB, env.JWT_SECRET, {
+      email: body.email,
+      password: body.password,
+    });
 
-    const dbUser = await syncUserToDB(env.DB, user);
-    return jsonResponse({ user: dbUser }, 200, corsHeaders);
+    if ('error' in result) {
+      return jsonResponse({ error: result.error }, 401, corsHeaders);
+    }
+
+    return jsonResponse({ user: result.user, token: result.token }, 200, corsHeaders);
+  }
+
+  if (path === '/api/auth/me' && request.method === 'GET') {
+    const user = await requireAuth(request, env);
+    if (!user) return jsonResponse({ error: 'Unauthorized' }, 401, corsHeaders);
+    return jsonResponse({ user }, 200, corsHeaders);
   }
 
   return jsonResponse({ error: 'Not found' }, 404, corsHeaders);
@@ -149,12 +170,9 @@ async function handleClerkAuth(request: Request, env: Env, corsHeaders: Record<s
 async function handleEvents(request: Request, env: Env, corsHeaders: Record<string, string>): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
-  const auth = await requireAuth(request, env);
+  const user = await requireAuth(request, env);
 
-  if (!auth) return jsonResponse({ error: 'Unauthorized' }, 401, corsHeaders);
-
-  const user = await getUserByClerkId(env.DB, auth.userId);
-  if (!user) return jsonResponse({ error: 'User not found in database' }, 404, corsHeaders);
+  if (!user) return jsonResponse({ error: 'Unauthorized' }, 401, corsHeaders);
 
   if (path === '/api/events' && request.method === 'POST') {
     const body = await request.json();
@@ -174,6 +192,8 @@ async function handleEvents(request: Request, env: Env, corsHeaders: Record<stri
       max_tickets: body.max_tickets,
       livekit_room: body.livekit_room,
       stream_url: body.stream_url,
+      category: body.category,
+      poster_url: body.poster_url,
     });
 
     const qrCode = crypto.randomUUID().substring(0, 12);
@@ -191,7 +211,17 @@ async function handleEvents(request: Request, env: Env, corsHeaders: Record<stri
   if (path === '/api/events' && request.method === 'GET') {
     const status = url.searchParams.get('status') || undefined;
     const events = await listEvents(env.DB, user.id, status);
-    return jsonResponse({ events }, 200, corsHeaders);
+
+    const eventsWithTickets = await Promise.all(events.map(async (event) => {
+      try {
+        const ticketTypes = await listEventTicketTypes(env.DB, event.id);
+        return { ...event, ticket_types: ticketTypes };
+      } catch {
+        return { ...event, ticket_types: [] };
+      }
+    }));
+
+    return jsonResponse({ events: eventsWithTickets }, 200, corsHeaders);
   }
 
   const eventId = path.split('/').pop();
@@ -202,10 +232,12 @@ async function handleEvents(request: Request, env: Env, corsHeaders: Record<stri
     if (event.user_id !== user.id) return jsonResponse({ error: 'Forbidden' }, 403, corsHeaders);
 
     const config = await getDonationConfig(env.DB, eventId!);
+    const donationTypes = await listEventDonationTypes(env.DB, eventId!);
+    const ticketTypes = await listEventTicketTypes(env.DB, eventId!);
     const ticketCount = await countEventTickets(env.DB, eventId!);
     const guestCount = await countEventGuests(env.DB, eventId!);
 
-    return jsonResponse({ event, donation_config: config, ticket_count: ticketCount, guest_count: guestCount }, 200, corsHeaders);
+    return jsonResponse({ event, donation_config: config, donation_types: donationTypes, ticket_types: ticketTypes, ticket_count: ticketCount, guest_count: guestCount }, 200, corsHeaders);
   }
 
   if (path.match(/^\/api\/events\/[^\/]+$/) && request.method === 'PUT') {
@@ -235,6 +267,115 @@ async function handleEvents(request: Request, env: Env, corsHeaders: Record<stri
     const body = await request.json();
     const config = await updateDonationConfig(env.DB, eventId!, body);
     return jsonResponse({ config }, 200, corsHeaders);
+  }
+
+  if (path.match(/^\/api\/events\/[^\/]+\/donation-types$/) && request.method === 'POST') {
+    const event = await getEvent(env.DB, eventId!);
+    if (!event) return jsonResponse({ error: 'Event not found' }, 404, corsHeaders);
+    if (event.user_id !== user.id) return jsonResponse({ error: 'Forbidden' }, 403, corsHeaders);
+
+    const body = await request.json();
+    if (!body.name) return jsonResponse({ error: 'Missing name' }, 400, corsHeaders);
+
+    const donationType = await createDonationType(env.DB, {
+      event_id: eventId!,
+      name: body.name,
+      preset_amounts: body.preset_amounts,
+      custom_amount_enabled: body.custom_amount_enabled,
+    });
+    return jsonResponse({ donation_type: donationType }, 201, corsHeaders);
+  }
+
+  if (path.match(/^\/api\/events\/[^\/]+\/donation-types$/) && request.method === 'GET') {
+    const event = await getEvent(env.DB, eventId!);
+    if (!event) return jsonResponse({ error: 'Event not found' }, 404, corsHeaders);
+    if (event.user_id !== user.id) return jsonResponse({ error: 'Forbidden' }, 403, corsHeaders);
+
+    const donationTypes = await listEventDonationTypes(env.DB, eventId!);
+    return jsonResponse({ donation_types: donationTypes }, 200, corsHeaders);
+  }
+
+  if (path.match(/^\/api\/events\/[^\/]+\/donation-types\/[^\/]+$/) && request.method === 'PUT') {
+    const event = await getEvent(env.DB, eventId!);
+    if (!event) return jsonResponse({ error: 'Event not found' }, 404, corsHeaders);
+    if (event.user_id !== user.id) return jsonResponse({ error: 'Forbidden' }, 403, corsHeaders);
+
+    const typeId = path.split('/').pop();
+    const body = await request.json();
+    const updated = await updateDonationType(env.DB, typeId!, body);
+    return jsonResponse({ donation_type: updated }, 200, corsHeaders);
+  }
+
+  if (path.match(/^\/api\/events\/[^\/]+\/donation-types\/[^\/]+$/) && request.method === 'DELETE') {
+    const event = await getEvent(env.DB, eventId!);
+    if (!event) return jsonResponse({ error: 'Event not found' }, 404, corsHeaders);
+    if (event.user_id !== user.id) return jsonResponse({ error: 'Forbidden' }, 403, corsHeaders);
+
+    const typeId = path.split('/').pop();
+    await deleteDonationType(env.DB, typeId!);
+    return jsonResponse({ success: true }, 200, corsHeaders);
+  }
+
+  if (path.match(/^\/api\/events\/[^\/]+\/poster$/) && request.method === 'POST') {
+    const event = await getEvent(env.DB, eventId!);
+    if (!event) return jsonResponse({ error: 'Event not found' }, 404, corsHeaders);
+    if (event.user_id !== user.id) return jsonResponse({ error: 'Forbidden' }, 403, corsHeaders);
+
+    const contentType = request.headers.get('Content-Type') || 'image/jpeg';
+    const body = await request.arrayBuffer();
+    const posterUrl = await uploadPoster(env, eventId!, body, contentType);
+
+    await updateEvent(env.DB, eventId!, { poster_url: posterUrl });
+    return jsonResponse({ poster_url: posterUrl }, 200, corsHeaders);
+  }
+
+  if (path.match(/^\/api\/events\/[^\/]+\/ticket-types$/) && request.method === 'POST') {
+    const event = await getEvent(env.DB, eventId!);
+    if (!event) return jsonResponse({ error: 'Event not found' }, 404, corsHeaders);
+    if (event.user_id !== user.id) return jsonResponse({ error: 'Forbidden' }, 403, corsHeaders);
+
+    const body = await request.json();
+    if (!body.name) return jsonResponse({ error: 'Missing name' }, 400, corsHeaders);
+
+    const ticketType = await createTicketType(env.DB, {
+      event_id: eventId!,
+      name: body.name,
+      type: body.type || 'free',
+      price: body.price || 0,
+      currency: body.currency || 'USD',
+      max_quantity: body.max_quantity,
+    });
+    return jsonResponse({ ticket_type: ticketType }, 201, corsHeaders);
+  }
+
+  if (path.match(/^\/api\/events\/[^\/]+\/ticket-types$/) && request.method === 'GET') {
+    const event = await getEvent(env.DB, eventId!);
+    if (!event) return jsonResponse({ error: 'Event not found' }, 404, corsHeaders);
+    if (event.user_id !== user.id) return jsonResponse({ error: 'Forbidden' }, 403, corsHeaders);
+
+    const ticketTypes = await listEventTicketTypes(env.DB, eventId!);
+    return jsonResponse({ ticket_types: ticketTypes }, 200, corsHeaders);
+  }
+
+  if (path.match(/^\/api\/events\/[^\/]+\/ticket-types\/[^\/]+$/) && request.method === 'PUT') {
+    const event = await getEvent(env.DB, eventId!);
+    if (!event) return jsonResponse({ error: 'Event not found' }, 404, corsHeaders);
+    if (event.user_id !== user.id) return jsonResponse({ error: 'Forbidden' }, 403, corsHeaders);
+
+    const typeId = path.split('/').pop();
+    const body = await request.json();
+    const updated = await updateTicketType(env.DB, typeId!, body);
+    return jsonResponse({ ticket_type: updated }, 200, corsHeaders);
+  }
+
+  if (path.match(/^\/api\/events\/[^\/]+\/ticket-types\/[^\/]+$/) && request.method === 'DELETE') {
+    const event = await getEvent(env.DB, eventId!);
+    if (!event) return jsonResponse({ error: 'Event not found' }, 404, corsHeaders);
+    if (event.user_id !== user.id) return jsonResponse({ error: 'Forbidden' }, 403, corsHeaders);
+
+    const typeId = path.split('/').pop();
+    await deleteTicketType(env.DB, typeId!);
+    return jsonResponse({ success: true }, 200, corsHeaders);
   }
 
   return jsonResponse({ error: 'Not found' }, 404, corsHeaders);
@@ -617,6 +758,32 @@ async function handleRtmpEndpoints(request: Request, env: Env, corsHeaders: Reco
     if (!isValid) return jsonResponse({ error: 'Invalid RTMP URL or stream key' }, 400, corsHeaders);
     const config = rtmpService.createStreamConfig({ rtmpUrl, streamKey });
     return jsonResponse(config, 200, corsHeaders);
+  }
+
+  return jsonResponse({ error: 'Not found' }, 404, corsHeaders);
+}
+
+async function handleSettings(request: Request, env: Env, corsHeaders: Record<string, string>): Promise<Response> {
+  const url = new URL(request.url);
+  const path = url.pathname;
+  const user = await requireAuth(request, env);
+
+  if (!user) return jsonResponse({ error: 'Unauthorized' }, 401, corsHeaders);
+
+  if (path === '/api/settings/payment' && request.method === 'GET') {
+    const settings = await getUserSettings(env.DB, user.id);
+    return jsonResponse({ settings }, 200, corsHeaders);
+  }
+
+  if (path === '/api/settings/payment' && request.method === 'PUT') {
+    const body = await request.json();
+    const settings = await upsertUserSettings(env.DB, user.id, {
+      paystack_secret_key: body.paystack_secret_key,
+      paystack_public_key: body.paystack_public_key,
+      stripe_secret_key: body.stripe_secret_key,
+      stripe_publishable_key: body.stripe_publishable_key,
+    });
+    return jsonResponse({ settings }, 200, corsHeaders);
   }
 
   return jsonResponse({ error: 'Not found' }, 404, corsHeaders);

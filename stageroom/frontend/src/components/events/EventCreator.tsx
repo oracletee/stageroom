@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useUser } from '@clerk/clerk-react';
+import { useAuthStore } from '../../hooks/useAuthStore';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 
@@ -24,7 +24,7 @@ interface EventCreatorProps {
 }
 
 export function EventCreator({ onSuccess, onCancel }: EventCreatorProps) {
-  const { user } = useUser();
+  const { token } = useAuthStore();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [formData, setFormData] = useState<EventFormData>({
@@ -48,7 +48,6 @@ export function EventCreator({ onSuccess, onCancel }: EventCreatorProps) {
     setError('');
 
     try {
-      const token = await user?.getToken();
       const response = await fetch(`${API_BASE}/api/events`, {
         method: 'POST',
         headers: {
@@ -104,35 +103,38 @@ export function EventCreator({ onSuccess, onCancel }: EventCreatorProps) {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  const inputClass = "w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent";
+  const labelClass = "block text-sm font-medium text-gray-300 mb-1";
+
   return (
     <div className="max-w-2xl mx-auto p-6">
-      <h2 className="text-2xl font-bold mb-6">Create New Event</h2>
+      <h2 className="text-2xl font-bold text-white mb-6">Create New Event</h2>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+        <div className="bg-red-500/10 border border-red-500/30 text-red-400 px-4 py-3 rounded mb-4 text-sm">
           {error}
         </div>
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>
-          <label className="block text-sm font-medium mb-1">Event Title *</label>
+          <label className={labelClass}>Event Title *</label>
           <input
             type="text"
             required
             value={formData.title}
             onChange={e => updateField('title', e.target.value)}
-            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+            className={inputClass}
             placeholder="e.g., Sunday Service, Concert, Conference"
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">Description</label>
+          <label className={labelClass}>Description</label>
           <textarea
             value={formData.description}
             onChange={e => updateField('description', e.target.value)}
-            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+            className={inputClass}
             rows={3}
             placeholder="Event description..."
           />
@@ -140,36 +142,36 @@ export function EventCreator({ onSuccess, onCancel }: EventCreatorProps) {
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium mb-1">Start Time *</label>
+            <label className={labelClass}>Start Time *</label>
             <input
               type="datetime-local"
               required
               value={formData.start_time}
               onChange={e => updateField('start_time', e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+              className={inputClass}
             />
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">End Time</label>
+            <label className={labelClass}>End Time</label>
             <input
               type="datetime-local"
               value={formData.end_time}
               onChange={e => updateField('end_time', e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+              className={inputClass}
             />
           </div>
         </div>
 
-        <div className="border-t pt-6">
-          <h3 className="text-lg font-semibold mb-4">Ticketing</h3>
+        <div className="border-t border-gray-700 pt-6">
+          <h3 className="text-lg font-semibold text-white mb-4">Ticketing</h3>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-1">Ticket Type</label>
+              <label className={labelClass}>Ticket Type</label>
               <select
                 value={formData.ticket_type}
                 onChange={e => updateField('ticket_type', e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                className={inputClass}
               >
                 <option value="free">Free</option>
                 <option value="paid">Paid</option>
@@ -179,22 +181,22 @@ export function EventCreator({ onSuccess, onCancel }: EventCreatorProps) {
             {formData.ticket_type === 'paid' && (
               <>
                 <div>
-                  <label className="block text-sm font-medium mb-1">Price</label>
+                  <label className={labelClass}>Price</label>
                   <input
                     type="number"
                     min="0"
                     step="0.01"
                     value={formData.ticket_price}
                     onChange={e => updateField('ticket_price', parseFloat(e.target.value) || 0)}
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className={inputClass}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">Currency</label>
+                  <label className={labelClass}>Currency</label>
                   <select
                     value={formData.currency}
                     onChange={e => updateField('currency', e.target.value)}
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className={inputClass}
                   >
                     <option value="USD">USD</option>
                     <option value="NGN">NGN</option>
@@ -208,23 +210,23 @@ export function EventCreator({ onSuccess, onCancel }: EventCreatorProps) {
           </div>
 
           <div className="mt-4">
-            <label className="block text-sm font-medium mb-1">Max Tickets (optional)</label>
+            <label className={labelClass}>Max Tickets (optional)</label>
             <input
               type="number"
               min="1"
               value={formData.max_tickets}
               onChange={e => updateField('max_tickets', e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+              className={inputClass}
               placeholder="Leave empty for unlimited"
             />
           </div>
         </div>
 
-        <div className="border-t pt-6">
-          <h3 className="text-lg font-semibold mb-4">Donations (Church)</h3>
+        <div className="border-t border-gray-700 pt-6">
+          <h3 className="text-lg font-semibold text-white mb-4">Donations (Church)</h3>
 
           <div className="space-y-3">
-            <label className="flex items-center gap-2">
+            <label className="flex items-center gap-2 text-gray-300">
               <input
                 type="checkbox"
                 checked={formData.enable_donations}
@@ -236,7 +238,7 @@ export function EventCreator({ onSuccess, onCancel }: EventCreatorProps) {
 
             {formData.enable_donations && (
               <>
-                <label className="flex items-center gap-2">
+                <label className="flex items-center gap-2 text-gray-300">
                   <input
                     type="checkbox"
                     checked={formData.enable_tithe}
@@ -246,7 +248,7 @@ export function EventCreator({ onSuccess, onCancel }: EventCreatorProps) {
                   <span className="text-sm">Enable Tithe</span>
                 </label>
 
-                <label className="flex items-center gap-2">
+                <label className="flex items-center gap-2 text-gray-300">
                   <input
                     type="checkbox"
                     checked={formData.enable_offering}
@@ -257,12 +259,12 @@ export function EventCreator({ onSuccess, onCancel }: EventCreatorProps) {
                 </label>
 
                 <div>
-                  <label className="block text-sm font-medium mb-1">Preset Amounts (comma-separated)</label>
+                  <label className={labelClass}>Preset Amounts (comma-separated)</label>
                   <input
                     type="text"
                     value={formData.preset_amounts}
                     onChange={e => updateField('preset_amounts', e.target.value)}
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className={inputClass}
                     placeholder="e.g., 1000, 5000, 10000"
                   />
                 </div>
@@ -283,7 +285,7 @@ export function EventCreator({ onSuccess, onCancel }: EventCreatorProps) {
             <button
               type="button"
               onClick={onCancel}
-              className="px-6 py-2 border rounded-lg hover:bg-gray-50"
+              className="px-6 py-2 border border-gray-600 text-gray-300 rounded-lg hover:bg-gray-700"
             >
               Cancel
             </button>

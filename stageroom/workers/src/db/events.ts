@@ -12,19 +12,22 @@ export async function createEvent(db: D1Database, data: {
   max_tickets?: number;
   livekit_room?: string;
   stream_url?: string;
+  category?: string;
+  poster_url?: string;
 }): Promise<Event> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
   const result = await db.prepare(
-    `INSERT INTO events (id, user_id, title, description, start_time, end_time, ticket_type, ticket_price, currency, max_tickets, livekit_room, stream_url, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO events (id, user_id, title, description, start_time, end_time, ticket_type, ticket_price, currency, max_tickets, livekit_room, stream_url, category, poster_url, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
     id, data.user_id, data.title, data.description || null,
     data.start_time, data.end_time || null,
     data.ticket_type || 'free', data.ticket_price || 0,
     data.currency || 'USD', data.max_tickets || null,
     data.livekit_room || null, data.stream_url || null,
+    data.category || null, data.poster_url || null,
     now, now
   ).run();
 
@@ -67,6 +70,8 @@ export async function updateEvent(db: D1Database, id: string, data: Partial<Even
   if (data.qr_code_url !== undefined) { fields.push('qr_code_url = ?'); params.push(data.qr_code_url); }
   if (data.livekit_room !== undefined) { fields.push('livekit_room = ?'); params.push(data.livekit_room); }
   if (data.stream_url !== undefined) { fields.push('stream_url = ?'); params.push(data.stream_url); }
+  if (data.category !== undefined) { fields.push('category = ?'); params.push(data.category); }
+  if (data.poster_url !== undefined) { fields.push('poster_url = ?'); params.push(data.poster_url); }
 
   if (fields.length === 0) return await getEvent(db, id);
 

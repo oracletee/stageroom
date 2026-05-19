@@ -7,9 +7,10 @@ import './Layout.css';
 
 interface LayoutProps {
   children: React.ReactNode;
+  onSetup?: () => void;
 }
 
-const Layout: React.FC<LayoutProps> = ({ children }) => {
+const Layout: React.FC<LayoutProps> = ({ children, onSetup }) => {
   const { appView, setAppView, stageMode } = useStreamStore();
   const [lyricOpen, setLyricOpen] = useState(false);
 
@@ -23,35 +24,41 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     'film-premiere': 'Film Premiere',
   };
 
+  const tabs: { view: string; label: string }[] = [
+    { view: 'host', label: 'Studio' },
+    { view: 'viewer', label: 'Viewer' },
+    { view: 'events', label: 'Events' },
+    { view: 'dashboard', label: 'Dashboard' },
+  ];
+
   return (
     <div className="h-screen flex flex-col bg-gray-900 text-white">
       <header className="bg-gray-800 border-b border-gray-700 shrink-0">
         <div className="max-w-7xl mx-auto px-4 py-2 flex items-center justify-between">
           <h1 className="text-lg font-bold">Stageroom</h1>
-          <div className="flex items-center space-x-2 bg-gray-700 rounded-lg p-0.5">
-            <button
-              onClick={() => setAppView('host')}
-              className={`px-3 py-1.5 rounded text-xs font-medium transition
-                ${appView === 'host' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
-            >
-              Studio
-            </button>
-            <button
-              onClick={() => setAppView('viewer')}
-              className={`px-3 py-1.5 rounded text-xs font-medium transition
-                ${appView === 'viewer' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
-            >
-              Viewer
-            </button>
-            <button
-              onClick={() => setAppView('dashboard')}
-              className={`px-3 py-1.5 rounded text-xs font-medium transition
-                ${appView === 'dashboard' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
-            >
-              Dashboard
-            </button>
+          <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2 bg-gray-700 rounded-lg p-0.5">
+              {tabs.map(tab => (
+                <button
+                  key={tab.view}
+                  onClick={() => setAppView(tab.view as any)}
+                  className={`px-3 py-1.5 rounded text-xs font-medium transition
+                    ${appView === tab.view ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="flex items-center space-x-3">
+            {appView === 'host' && onSetup && (
+              <button
+                onClick={onSetup}
+                className="px-3 py-1.5 rounded text-xs font-medium bg-blue-600 text-white hover:bg-blue-500 transition"
+              >
+                Instant Setup
+              </button>
+            )}
             {appView === 'host' && stageMode === 'worship' && (
               <button onClick={() => setLyricOpen(true)}
                 className="px-3 py-1 rounded text-xs bg-blue-700 hover:bg-blue-600 text-white">

@@ -1,10 +1,12 @@
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
-  clerk_id TEXT UNIQUE NOT NULL,
-  email TEXT NOT NULL,
+  clerk_id TEXT,
+  email TEXT NOT NULL UNIQUE,
   name TEXT,
   role TEXT DEFAULT 'organizer',
+  password_hash TEXT,
+  password_salt TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -23,6 +25,8 @@ CREATE TABLE IF NOT EXISTS events (
   qr_code_url TEXT,
   livekit_room TEXT,
   stream_url TEXT,
+  category TEXT,
+  poster_url TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -104,6 +108,38 @@ CREATE TABLE IF NOT EXISTS qr_codes (
   url TEXT NOT NULL,
   scan_count INTEGER DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS donation_types (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL REFERENCES events(id),
+  name TEXT NOT NULL,
+  preset_amounts TEXT,
+  custom_amount_enabled INTEGER DEFAULT 1,
+  currency TEXT DEFAULT 'USD',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS ticket_types (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL REFERENCES events(id),
+  name TEXT NOT NULL,
+  type TEXT DEFAULT 'free',
+  price INTEGER DEFAULT 0,
+  currency TEXT DEFAULT 'USD',
+  max_quantity INTEGER,
+  sold_count INTEGER DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS user_settings (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  paystack_secret_key TEXT,
+  paystack_public_key TEXT,
+  stripe_secret_key TEXT,
+  stripe_publishable_key TEXT,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 `;
 
