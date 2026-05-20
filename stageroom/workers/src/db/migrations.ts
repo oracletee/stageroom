@@ -141,21 +141,107 @@ CREATE TABLE IF NOT EXISTS user_settings (
   stripe_publishable_key TEXT,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS scenes (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  name TEXT NOT NULL,
+  source_ids TEXT DEFAULT '[]',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS sources (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  scene_id TEXT REFERENCES scenes(id),
+  type TEXT NOT NULL,
+  label TEXT,
+  config TEXT,
+  live_input_uid TEXT,
+  playback_url TEXT,
+  is_active INTEGER DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS user_studio_config (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  selected_scene_id TEXT,
+  program_scene_id TEXT,
+  stage_mode TEXT DEFAULT 'ted-talk',
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS stream_destinations (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  name TEXT NOT NULL,
+  platform TEXT NOT NULL,
+  rtmp_url TEXT,
+  stream_key TEXT,
+  is_enabled INTEGER DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS stream_sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  live_input_uid TEXT NOT NULL,
+  status TEXT DEFAULT 'active',
+  started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  ended_at DATETIME,
+  platform TEXT,
+  platform_broadcast_id TEXT
+);
+
+CREATE TABLE IF NOT EXISTS scheduled_streams (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  title TEXT NOT NULL,
+  description TEXT,
+  platform TEXT NOT NULL,
+  platform_config TEXT,
+  scheduled_time DATETIME NOT NULL,
+  duration INTEGER,
+  status TEXT DEFAULT 'scheduled',
+  live_input_uid TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 `;
 
 export async function runMigrations(db: D1Database): Promise<boolean> {
   try {
-    const tables = await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").all();
-    if (tables.results && tables.results.length > 0) {
-      return true;
-    }
-
     const statements = SCHEMA_SQL.split(';').filter(s => s.trim());
     for (const stmt of statements) {
       if (stmt.trim()) {
         await db.prepare(stmt.trim()).run();
       }
     }
+
+    const { results: hasSceneId } = await db.prepare("PRAGMA table_info(sources)").all();
+    const hasSceneIdCol = (hasSceneId as any[])?.some((col: any) => col.name === 'scene_id');
+    if (!hasSceneIdCol) {
+      await db.prepare("ALTER TABLE sources ADD COLUMN scene_id TEXT REFERENCES scenes(id)").run();
+    }
+
+    const { results: hasPlaybackUrl } = await db.prepare("PRAGMA table_info(sources)").all();
+    const hasPlaybackUrlCol = (hasPlaybackUrl as any[])?.some((col: any) => col.name === 'playback_url');
+    if (!hasPlaybackUrlCol) {
+      await db.prepare("ALTER TABLE sources ADD COLUMN playback_url TEXT").run();
+    }
+
+    const { results: hasIsActive } = await db.prepare("PRAGMA table_info(sources)").all();
+    const hasIsActiveCol = (hasIsActive as any[])?.some((col: any) => col.name === 'is_active');
+    if (!hasIsActiveCol) {
+      await db.prepare("ALTER TABLE sources ADD COLUMN is_active INTEGER DEFAULT 1").run();
+    }
+
+    const { results: hasEventId } = await db.prepare("PRAGMA table_info(scheduled_streams)").all();
+    const hasEventIdCol = (hasEventId as any[])?.some((col: any) => col.name === 'event_id');
+    if (!hasEventIdCol) {
+      await db.prepare("ALTER TABLE scheduled_streams ADD COLUMN event_id TEXT REFERENCES events(id)").run();
+    }
+
     return true;
   } catch (error) {
     console.error('Migration failed:', error);

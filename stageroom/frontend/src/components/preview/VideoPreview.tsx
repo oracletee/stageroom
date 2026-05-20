@@ -13,17 +13,44 @@ const modeConfig: Record<StageMode, { accent: string; layout: 'side' | 'stacked'
 };
 
 export const VideoPreview: React.FC = () => {
-  const { selectedSceneId, programSceneId, pushToProgram, isStreaming, setStreaming, isRecording, setRecording, stageMode } = useStreamStore();
+  const { selectedSceneId, programSceneId, programSnapshot, pushToProgram, isStreaming, setStreaming, isRecording, setRecording, stageMode, streamSession, setStreamSession, destinations, scenes } = useStreamStore();
   const { connected, connectionState } = useLiveKit();
 
   const config = modeConfig[stageMode];
+  const enabledCount = destinations.filter(d => d.isEnabled).length;
+  const canGoLive = enabledCount > 0;
+
+  const previewSceneName = scenes.find(s => s.id === selectedSceneId)?.name;
+  const programSceneName = programSnapshot
+    ? scenes.find(s => s.id === programSnapshot.sceneId)?.name
+    : undefined;
 
   const handleGoLive = async () => {
     if (isStreaming) {
       setStreaming(false);
+      setStreamSession(null);
     } else {
       if (!programSceneId) pushToProgram();
-      setStreaming(true);
+
+      try {
+        
+        const response = await fetch(`/api/stream/live-input`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to create live input');
+        }
+
+        const data = await response.json();
+        setStreamSession({ liveInputUid: data.uid, startedAt: new Date().toISOString() });
+        setStreaming(true);
+      } catch (err: any) {
+        console.error('Failed to start stream:', err);
+        setStreamSession({ error: err.message });
+        setStreaming(true);
+      }
     }
   };
 
@@ -55,16 +82,31 @@ export const VideoPreview: React.FC = () => {
 
   const renderControls = () => (
     <div className="mt-2 flex gap-2">
-      <button onClick={handleGoLive}
-        className={`flex-1 px-4 py-2 rounded text-sm font-semibold transition ${isStreaming ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-green-600 hover:bg-green-700 text-white'}`}>
+      <button onClick={handleGoLive} disabled={!canGoLive && !isStreaming}
+        className={`flex-1 px-4 py-2 rounded text-sm font-semibold transition ${!canGoLive && !isStreaming ? 'bg-gray-600 text-gray-400 cursor-not-allowed' : isStreaming ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-green-600 hover:bg-green-700 text-white'}`}>
         {isStreaming ? '■ Stop' : '● Go Live'}
       </button>
+      {!canGoLive && !isStreaming && (
+        <span className="text-xs text-gray-500 self-center">Enable ≥1 destination</span>
+      )}
       <button onClick={handleRecord}
         className={`flex-1 px-4 py-2 rounded text-sm font-semibold transition ${isRecording ? 'bg-red-700 hover:bg-red-800 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
         {isRecording ? '■ Stop Recording' : '● Start Recording'}
       </button>
     </div>
   );
+
+  const renderStreamStatus = () => {
+    if (!isStreaming || !streamSession) return null;
+    if (streamSession.error) {
+      return <div className="mt-2 text-xs text-red-400">Stream error: {streamSession.error}</div>;
+    }
+    return (
+      <div className="mt-2 text-xs text-gray-400">
+        Live input: {streamSession.liveInputUid?.substring(0, 12)}... | Started: {new Date(streamSession.startedAt || '').toLocaleTimeString()}
+      </div>
+    );
+  };
 
   return (
     <div className={`bg-gray-800 rounded-lg p-4 border-l-4 ${config.accent}`}>
@@ -87,14 +129,15 @@ export const VideoPreview: React.FC = () => {
             </button>
           </div>
           <div className="flex-[2]">
-            {renderMonitor('Program', 'program', programSceneId ? 'Scene' : undefined, isStreaming)}
+            {renderMonitor('Program', 'program', programSceneName, isStreaming)}
             {renderControls()}
+            {renderStreamStatus()}
           </div>
         </div>
       ) : (
         <div className="flex space-x-4">
           <div className="flex-1">
-            {renderMonitor('Preview', 'preview', selectedSceneId ? 'Scene' : undefined)}
+            {renderMonitor('Preview', 'preview', previewSceneName)}
           </div>
           <div className="flex items-center justify-center">
             <button onClick={pushToProgram} disabled={!selectedSceneId}
@@ -103,8 +146,9 @@ export const VideoPreview: React.FC = () => {
             </button>
           </div>
           <div className="flex-1">
-            {renderMonitor('Program', 'program', programSceneId ? 'Scene' : undefined, isStreaming)}
+            {renderMonitor('Program', 'program', programSceneName, isStreaming)}
             {renderControls()}
+            {renderStreamStatus()}
           </div>
         </div>
       )}

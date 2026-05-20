@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { useAuthStore } from '../../hooks/useAuthStore';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
+
 
 const CATEGORIES = [
   { id: 'ted-talk', label: 'TED Talk' },
@@ -115,7 +115,7 @@ export function EventForm({ initialData, onSuccess, onCancel }: EventFormProps) 
     }
 
     try {
-      const res = await fetch(`${API_BASE}/api/events`, {
+      const res = await fetch(`/api/events`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -137,7 +137,7 @@ export function EventForm({ initialData, onSuccess, onCancel }: EventFormProps) 
 
       for (const ticket of tickets) {
         if (ticket.name.trim()) {
-          await fetch(`${API_BASE}/api/events/${eventId}/ticket-types`, {
+          await fetch(`/api/events/${eventId}/ticket-types`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -156,7 +156,7 @@ export function EventForm({ initialData, onSuccess, onCancel }: EventFormProps) 
 
       if (posterFile) {
         const buffer = await posterFile.arrayBuffer();
-        await fetch(`${API_BASE}/api/events/${eventId}/poster`, {
+        await fetch(`/api/events/${eventId}/poster`, {
           method: 'POST',
           headers: {
             'Content-Type': posterFile.type,
@@ -169,7 +169,7 @@ export function EventForm({ initialData, onSuccess, onCancel }: EventFormProps) 
       if (enableDonations) {
         for (const dt of donationTypes) {
           if (dt.name.trim()) {
-            await fetch(`${API_BASE}/api/events/${eventId}/donation-types`, {
+            await fetch(`/api/events/${eventId}/donation-types`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',

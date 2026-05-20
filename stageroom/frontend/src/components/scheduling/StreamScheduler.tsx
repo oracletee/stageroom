@@ -1,54 +1,61 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 interface ScheduledStream {
   id: string;
   title: string;
   description: string;
-  platform: 'youtube' | 'twitch' | 'facebook' | 'custom-rtmp';
-  scheduledTime: string; // ISO 8601 format
-  duration: number; // in minutes
+  platform: string;
+  scheduledTime: string;
+  duration: number;
   status: 'scheduled' | 'live' | 'completed' | 'cancelled';
-  thumbnailUrl?: string;
+  liveInputUid?: string;
 }
 
 interface StreamSchedulerProps {
-  // In a real implementation, this would manage scheduled streams
+  eventId?: string;
 }
 
-export const StreamScheduler: React.FC<StreamSchedulerProps> = () => {
-  const [scheduledStreams, setScheduledStreams] = useState<ScheduledStream[]>([
-    {
-      id: 'stream-1',
-      title: 'Weekly Tech Talk',
-      description': 'Join us for our weekly discussion on the latest tech trends',
-      platform: 'youtube',
-      scheduledTime: '2026-05-15T14:00:00Z',
-      duration: 60,
-      status: 'scheduled',
-      thumbnailUrl: 'https://via.placeholder.com/1280x720?text=Weekly+Tech+Talk'
-    },
-    {
-      id: 'stream-2',
-      title': 'Live Q&A Session',
-      description: 'Ask me anything about streaming and content creation',
-      platform: 'twitch',
-      scheduledTime: '2026-05-16T19:30:00Z',
-      duration: 90,
-      status: 'scheduled',
-      thumbnailUrl: 'https://via.placeholder.com/1280x720?text=Live+Q%26A+Session'
-    }
-  ]);
-  
+export const StreamScheduler: React.FC<StreamSchedulerProps> = ({ eventId }) => {
+  const [scheduledStreams, setScheduledStreams] = useState<ScheduledStream[]>([]);
   const [newStream, setNewStream] = useState({
     title: '',
     description: '',
-    platform: 'youtube' as const,
+    platform: 'youtube' as string,
     scheduledTime: '',
-    duration: 60
+    duration: 60,
+    rtmpUrl: '',
+    streamKey: '',
   });
-  
   const [isScheduling, setIsScheduling] = useState(false);
   const [scheduleStatus, setScheduleStatus] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const getAuthHeader = () => {
+    const token = localStorage.getItem('token');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
+  useEffect(() => {
+    loadScheduledStreams();
+  }, [eventId]);
+
+  const loadScheduledStreams = async () => {
+    try {
+      const params = new URLSearchParams({ status: 'scheduled' });
+      if (eventId) params.set('eventId', eventId);
+      const response = await fetch(`/stream/schedule?${params.toString()}`, {
+        headers: getAuthHeader(),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setScheduledStreams(data.scheduledStreams || []);
+      }
+    } catch (err) {
+      console.error('Failed to load scheduled streams:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
@@ -58,8 +65,7 @@ export const StreamScheduler: React.FC<StreamSchedulerProps> = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Basic validation
+
     if (!newStream.title.trim() || !newStream.scheduledTime) {
       setScheduleStatus({ message: 'Please fill in all required fields', type: 'error' });
       return;
@@ -69,64 +75,67 @@ export const StreamScheduler: React.FC<StreamSchedulerProps> = () => {
     setScheduleStatus(null);
 
     try {
-      // Simulate API call to schedule stream
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      // In a real implementation, this would make an API call to your backend
-      const newScheduledStream: ScheduledStream = {
-        id: `stream-${Date.now()}`,
-        title: newStream.title,
-        description: newStream.description,
-        platform: newStream.platform,
-        scheduledTime: newStream.scheduledTime,
-        duration: newStream.duration,
-        status: 'scheduled'
-      };
-      
-      setScheduledStreams(prev => [newScheduledStream, ...prev]);
+      const platformConfig = newStream.platform === 'custom-rtmp'
+        ? { rtmpUrl: newStream.rtmpUrl, streamKey: newStream.streamKey }
+        : {};
+
+      const response = await fetch(`/stream/schedule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        body: JSON.stringify({
+          title: newStream.title,
+          description: newStream.description,
+          platform: newStream.platform,
+          scheduledTime: newStream.scheduledTime,
+          duration: newStream.duration,
+          platformConfig,
+          eventId: eventId || null,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to schedule stream');
+      }
+
+      await loadScheduledStreams();
       setNewStream({
         title: '',
         description: '',
         platform: 'youtube',
         scheduledTime: '',
-        duration: 60
+        duration: 60,
+        rtmpUrl: '',
+        streamKey: '',
       });
       setScheduleStatus({ message: 'Stream scheduled successfully!', type: 'success' });
-    } catch (error) {
-      setScheduleStatus({ message: 'Failed to schedule stream. Please try again.', type: 'error' });
+    } catch (error: any) {
+      setScheduleStatus({ message: error.message || 'Failed to schedule stream', type: 'error' });
     } finally {
       setIsScheduling(false);
     }
   };
 
-  const handleCancelStream = (streamId: string) => {
-    setScheduledStreams(prev =>
-      prev.map(stream =>
-        stream.id === streamId
-          ? { ...stream, status: 'cancelled' }
-          : stream
-      )
-    );
+  const handleCancelStream = async (streamId: string) => {
+    try {
+      await fetch(`/stream/schedule/${streamId}`, { method: 'DELETE', headers: getAuthHeader() });
+      setScheduledStreams(prev => prev.filter(s => s.id !== streamId));
+    } catch (err) {
+      console.error('Failed to cancel stream:', err);
+    }
   };
 
-  const handleStartStream = (streamId: string) => {
-    setScheduledStreams(prev =>
-      prev.map(stream =>
-        stream.id === streamId
-          ? { ...stream, status: 'live' }
-          : stream
-      )
-    );
-  };
-
-  const handleCompleteStream = (streamId: string) => {
-    setScheduledStreams(prev =>
-      prev.map(stream =>
-        stream.id === streamId
-          ? { ...stream, status: 'completed' }
-          : stream
-      )
-    );
+  const handleStartStream = async (streamId: string) => {
+    try {
+      await fetch(`/stream/schedule/${streamId}/start`, { method: 'POST', headers: getAuthHeader() });
+      setScheduledStreams(prev =>
+        prev.map(stream =>
+          stream.id === streamId ? { ...stream, status: 'live' } : stream
+        )
+      );
+    } catch (err) {
+      console.error('Failed to start stream:', err);
+    }
   };
 
   return (
@@ -139,7 +148,7 @@ export const StreamScheduler: React.FC<StreamSchedulerProps> = () => {
       </div>
 
       {scheduleStatus && (
-        <div className={`mb-4 p-3 rounded ${scheduleStatus.type === 'success' ? 'bg-green-900 bg-opacity-20' : 'bg-red-900 bg-opacity-20'} 
+        <div className={`mb-4 p-3 rounded ${scheduleStatus.type === 'success' ? 'bg-green-900 bg-opacity-20' : 'bg-red-900 bg-opacity-20'}
                      border ${scheduleStatus.type === 'success' ? 'border-green-500' : 'border-red-500'} `}>
           <p className={`text-${scheduleStatus.type === 'success' ? 'green-400' : 'red-400'}`}>
             {scheduleStatus.message}
@@ -162,7 +171,7 @@ export const StreamScheduler: React.FC<StreamSchedulerProps> = () => {
             disabled={isScheduling}
           />
         </div>
-        
+
         <div className="space-y-2">
           <label className="block text-sm font-medium text-gray-300 mb-1">
             Description
@@ -177,7 +186,7 @@ export const StreamScheduler: React.FC<StreamSchedulerProps> = () => {
             disabled={isScheduling}
           />
         </div>
-        
+
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-2">
             <label className="block text-sm font-medium text-gray-300 mb-1">
@@ -196,7 +205,7 @@ export const StreamScheduler: React.FC<StreamSchedulerProps> = () => {
               <option value="custom-rtmp">Custom RTMP</option>
             </select>
           </div>
-          
+
           <div className="space-y-2">
             <label className="block text-sm font-medium text-gray-300 mb-1">
               Duration (minutes)
@@ -214,7 +223,7 @@ export const StreamScheduler: React.FC<StreamSchedulerProps> = () => {
             />
           </div>
         </div>
-        
+
         <div className="space-y-2">
           <label className="block text-sm font-medium text-gray-300 mb-1">
             Scheduled Time
@@ -228,7 +237,40 @@ export const StreamScheduler: React.FC<StreamSchedulerProps> = () => {
             disabled={isScheduling}
           />
         </div>
-        
+
+        {newStream.platform === 'custom-rtmp' && (
+          <>
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                RTMP URL
+              </label>
+              <input
+                type="text"
+                name="rtmpUrl"
+                value={newStream.rtmpUrl}
+                onChange={handleInputChange}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="rtmp://..."
+                disabled={isScheduling}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                Stream Key
+              </label>
+              <input
+                type="text"
+                name="streamKey"
+                value={newStream.streamKey}
+                onChange={handleInputChange}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Stream key"
+                disabled={isScheduling}
+              />
+            </div>
+          </>
+        )}
+
         <button
           type="submit"
           disabled={isScheduling}
@@ -239,8 +281,10 @@ export const StreamScheduler: React.FC<StreamSchedulerProps> = () => {
       </form>
 
       <div className="mt-4">
-        <h3 className="text-lg font-semibold mb-3">Scheduled Streams ({scheduledStreams.filter(s => s.status === 'scheduled').length})</h3>
-        {scheduledStreams.length === 0 ? (
+        <h3 className="text-lg font-semibold mb-3">Scheduled Streams ({scheduledStreams.length})</h3>
+        {isLoading ? (
+          <p className="text-center text-gray-400 py-4">Loading...</p>
+        ) : scheduledStreams.length === 0 ? (
           <p className="text-center text-gray-400 py-4">
             No streams scheduled yet
           </p>
@@ -249,32 +293,21 @@ export const StreamScheduler: React.FC<StreamSchedulerProps> = () => {
             {scheduledStreams.map((stream) => (
               <div
                 key={stream.id}
-                className={`flex items-center p-3 bg-gray-900 rounded 
+                className={`flex items-center p-3 bg-gray-900 rounded
                            ${stream.status === 'live' ? 'border-l-4 border-green-500' :
                             stream.status === 'completed' ? 'border-l-4 border-blue-500' :
                             stream.status === 'cancelled' ? 'border-l-4 border-red-500' : ''}`}
               >
-                <div className="flex-shrink-0">
-                  {stream.thumbnailUrl ? (
-                    <img 
-                      src={stream.thumbnailUrl} 
-                      alt={stream.title} 
-                      className="h-10 w-10 rounded object-cover"
-                    />
-                  ) : (
-                    <div className="h-10 w-10 bg-gray-700 rounded-full flex items-center justify-center text-sm font-medium">
-                      {stream.title.charAt(0).toUpperCase()}
-                    </div>
-                  )}
-                </div>
-                <div className="flex-1 ml-3">
+                <div className="flex-1">
                   <div className="flex justify-between items-start">
                     <div>
                       <p className="font-medium text-white">{stream.title}</p>
-                      <p className="text-xs text-gray-400">{stream.description}</p>
+                      {stream.description && (
+                        <p className="text-xs text-gray-400">{stream.description}</p>
+                      )}
                     </div>
                     <div className="flex space-x-2 text-xs">
-                      <span className={`px-2 py-0.5 text-xs rounded-full 
+                      <span className={`px-2 py-0.5 text-xs rounded-full
                                     ${stream.status === 'scheduled' ? 'bg-blue-500 text-white' :
                                      stream.status === 'live' ? 'bg-green-500 text-white' :
                                      stream.status === 'completed' ? 'bg-blue-500 text-white' :
@@ -297,7 +330,7 @@ export const StreamScheduler: React.FC<StreamSchedulerProps> = () => {
                     </span>
                   </div>
                 </div>
-                <div className="flex-shrink-0 space-x-2">
+                <div className="flex-shrink-0 space-x-2 ml-3">
                   {stream.status === 'scheduled' && (
                     <>
                       <button
@@ -305,25 +338,14 @@ export const StreamScheduler: React.FC<StreamSchedulerProps> = () => {
                         className="px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-sm"
                         title="Go Live Now"
                       >
-                        ▶️
+                        ▶
                       </button>
                       <button
                         onClick={() => handleCancelStream(stream.id)}
                         className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-sm"
                         title="Cancel Stream"
                       >
-                        ❌
-                      </button>
-                    </>
-                  )}
-                  {stream.status === 'live' && (
-                    <>
-                      <button
-                        onClick={() => handleCompleteStream(stream.id)}
-                        className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm"
-                        title="Mark as Complete"
-                      >
-                        ✓
+                        ✕
                       </button>
                     </>
                   )}

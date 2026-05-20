@@ -19,7 +19,7 @@ interface AuthState {
   checkAuth: () => Promise<void>;
 }
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
+
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
@@ -36,7 +36,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   login: async (email: string, password: string) => {
     set({ loading: true });
     try {
-      const res = await fetch(`${API_BASE}/api/auth/sign-in`, {
+      const res = await fetch(`/api/auth/sign-in`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
@@ -53,7 +53,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   register: async (email: string, password: string, name?: string) => {
     set({ loading: true });
     try {
-      const res = await fetch(`${API_BASE}/api/auth/sign-up`, {
+      const res = await fetch(`/api/auth/sign-up`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, name }),
@@ -76,7 +76,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const token = get().token;
     if (!token) return;
     try {
-      const res = await fetch(`${API_BASE}/api/auth/me`, {
+      const res = await fetch(`/api/auth/me`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (!res.ok) {

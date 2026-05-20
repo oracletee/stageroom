@@ -98,6 +98,30 @@ export default {
         return handleRtmpEndpoints(request, env, corsHeaders);
       }
 
+      if (path.startsWith('/api/sources')) {
+        return handleSourceEndpoints(request, env, corsHeaders);
+      }
+
+      if (path.startsWith('/api/scenes')) {
+        return handleSceneEndpoints(request, env, corsHeaders);
+      }
+
+      if (path.startsWith('/api/studio/config')) {
+        return handleStudioConfigEndpoints(request, env, corsHeaders);
+      }
+
+      if (path.startsWith('/api/destinations')) {
+        return handleDestinationEndpoints(request, env, corsHeaders);
+      }
+
+      if (path.startsWith('/api/stream/sessions')) {
+        return handleStreamSessionEndpoints(request, env, corsHeaders);
+      }
+
+      if (path.startsWith('/api/stream/schedule')) {
+        return handleScheduleEndpoints(request, env, corsHeaders);
+      }
+
       return new Response('Stageroom API', {
         headers: { 'Content-Type': 'text/plain', ...corsHeaders },
       });
@@ -784,6 +808,262 @@ async function handleSettings(request: Request, env: Env, corsHeaders: Record<st
       stripe_publishable_key: body.stripe_publishable_key,
     });
     return jsonResponse({ settings }, 200, corsHeaders);
+  }
+
+  return jsonResponse({ error: 'Not found' }, 404, corsHeaders);
+}
+
+async function handleSourceEndpoints(request: Request, env: Env, corsHeaders: Record<string, string>): Promise<Response> {
+  const url = new URL(request.url);
+  const path = url.pathname;
+  const user = await requireAuth(request, env);
+  if (!user) return jsonResponse({ error: 'Unauthorized' }, 401, corsHeaders);
+
+  if (path === '/api/sources' && request.method === 'POST') {
+    const body = await request.json();
+    const id = crypto.randomUUID();
+    await env.DB.prepare(
+      'INSERT INTO sources (id, user_id, scene_id, type, label, config, live_input_uid, playback_url, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).bind(id, user.id, body.sceneId || null, body.type, body.label, JSON.stringify(body.config || {}), body.liveInputUid || null, body.playbackUrl || null, body.isActive !== false ? 1 : 0).run();
+
+    if (body.sceneId) {
+      const { results: sceneRows } = await env.DB.prepare('SELECT source_ids FROM scenes WHERE id = ? AND user_id = ?').bind(body.sceneId, user.id).all();
+      if (sceneRows?.[0]) {
+        const existingIds = JSON.parse(sceneRows[0].source_ids || '[]');
+        if (!existingIds.includes(id)) {
+          existingIds.push(id);
+          await env.DB.prepare('UPDATE scenes SET source_ids = ? WHERE id = ?').bind(JSON.stringify(existingIds), body.sceneId).run();
+        }
+      }
+    }
+
+    return jsonResponse({ id, type: body.type, label: body.label }, 201, corsHeaders);
+  }
+
+  if (path === '/api/sources' && request.method === 'GET') {
+    const { results } = await env.DB.prepare('SELECT * FROM sources WHERE user_id = ? ORDER BY created_at ASC').bind(user.id).all();
+    return jsonResponse({ sources: results }, 200, corsHeaders);
+  }
+
+  if (path.match(/^\/api\/sources\/[^\/]+$/) && request.method === 'DELETE') {
+    const sourceId = path.split('/').pop();
+    await env.DB.prepare('DELETE FROM sources WHERE id = ? AND user_id = ?').bind(sourceId, user.id).run();
+    return jsonResponse({ success: true }, 200, corsHeaders);
+  }
+
+  if (path.match(/^\/api\/sources\/[^\/]+$/) && request.method === 'PUT') {
+    const sourceId = path.split('/').pop();
+    const body = await request.json();
+    const updates: string[] = [];
+    const values: any[] = [];
+    if (body.label !== undefined) { updates.push('label = ?'); values.push(body.label); }
+    if (body.config !== undefined) { updates.push('config = ?'); values.push(JSON.stringify(body.config)); }
+    if (body.isActive !== undefined) { updates.push('is_active = ?'); values.push(body.isActive ? 1 : 0); }
+    if (body.sceneId !== undefined) { updates.push('scene_id = ?'); values.push(body.sceneId); }
+    if (body.liveInputUid !== undefined) { updates.push('live_input_uid = ?'); values.push(body.liveInputUid); }
+    if (body.playbackUrl !== undefined) { updates.push('playback_url = ?'); values.push(body.playbackUrl); }
+    if (updates.length === 0) return jsonResponse({ success: true }, 200, corsHeaders);
+    values.push(sourceId, user.id);
+    await env.DB.prepare(`UPDATE sources SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`).bind(...values).run();
+    return jsonResponse({ success: true }, 200, corsHeaders);
+  }
+
+  return jsonResponse({ error: 'Not found' }, 404, corsHeaders);
+}
+
+async function handleSceneEndpoints(request: Request, env: Env, corsHeaders: Record<string, string>): Promise<Response> {
+  const url = new URL(request.url);
+  const path = url.pathname;
+  const user = await requireAuth(request, env);
+  if (!user) return jsonResponse({ error: 'Unauthorized' }, 401, corsHeaders);
+
+  if (path === '/api/scenes' && request.method === 'POST') {
+    const body = await request.json();
+    const id = body.id || crypto.randomUUID();
+    await env.DB.prepare(
+      'INSERT OR REPLACE INTO scenes (id, user_id, name, source_ids) VALUES (?, ?, ?, ?)'
+    ).bind(id, user.id, body.name || 'New Scene', JSON.stringify(body.sourceIds || [])).run();
+    return jsonResponse({ id, name: body.name || 'New Scene', sourceIds: body.sourceIds || [] }, 201, corsHeaders);
+  }
+
+  if (path === '/api/scenes' && request.method === 'GET') {
+    const { results } = await env.DB.prepare('SELECT * FROM scenes WHERE user_id = ? ORDER BY created_at ASC').bind(user.id).all();
+    return jsonResponse({ scenes: results }, 200, corsHeaders);
+  }
+
+  if (path.match(/^\/api\/scenes\/[^\/]+$/) && request.method === 'PUT') {
+    const sceneId = path.split('/').pop();
+    const body = await request.json();
+    const updates: string[] = [];
+    const values: any[] = [];
+    if (body.name !== undefined) { updates.push('name = ?'); values.push(body.name); }
+    if (body.sourceIds !== undefined) { updates.push('source_ids = ?'); values.push(JSON.stringify(body.sourceIds)); }
+    if (updates.length === 0) return jsonResponse({ success: true }, 200, corsHeaders);
+    values.push(sceneId, user.id);
+    await env.DB.prepare(`UPDATE scenes SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`).bind(...values).run();
+    return jsonResponse({ success: true }, 200, corsHeaders);
+  }
+
+  if (path.match(/^\/api\/scenes\/[^\/]+$/) && request.method === 'DELETE') {
+    const sceneId = path.split('/').pop();
+    await env.DB.prepare('DELETE FROM scenes WHERE id = ? AND user_id = ?').bind(sceneId, user.id).run();
+    await env.DB.prepare('UPDATE sources SET scene_id = NULL WHERE scene_id = ? AND user_id = ?').bind(sceneId, user.id).run();
+    return jsonResponse({ success: true }, 200, corsHeaders);
+  }
+
+  return jsonResponse({ error: 'Not found' }, 404, corsHeaders);
+}
+
+async function handleStudioConfigEndpoints(request: Request, env: Env, corsHeaders: Record<string, string>): Promise<Response> {
+  const url = new URL(request.url);
+  const path = url.pathname;
+  const user = await requireAuth(request, env);
+  if (!user) return jsonResponse({ error: 'Unauthorized' }, 401, corsHeaders);
+
+  if (path === '/api/studio/config' && request.method === 'GET') {
+    const { results } = await env.DB.prepare('SELECT * FROM user_studio_config WHERE user_id = ?').bind(user.id).all();
+    const config = results?.[0] || null;
+    const scenesRes = await env.DB.prepare('SELECT * FROM scenes WHERE user_id = ? ORDER BY created_at ASC').bind(user.id).all();
+    const sourcesRes = await env.DB.prepare('SELECT * FROM sources WHERE user_id = ? ORDER BY created_at ASC').bind(user.id).all();
+    return jsonResponse({
+      config,
+      scenes: scenesRes.results || [],
+      sources: sourcesRes.results || [],
+    }, 200, corsHeaders);
+  }
+
+  if (path === '/api/studio/config' && request.method === 'POST') {
+    const body = await request.json();
+    const id = crypto.randomUUID();
+    await env.DB.prepare(
+      'INSERT OR REPLACE INTO user_studio_config (id, user_id, selected_scene_id, program_scene_id, stage_mode, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+    ).bind(id, user.id, body.selectedSceneId || null, body.programSceneId || null, body.stageMode || 'ted-talk', new Date().toISOString()).run();
+    return jsonResponse({ success: true }, 200, corsHeaders);
+  }
+
+  return jsonResponse({ error: 'Not found' }, 404, corsHeaders);
+}
+
+async function handleDestinationEndpoints(request: Request, env: Env, corsHeaders: Record<string, string>): Promise<Response> {
+  const url = new URL(request.url);
+  const path = url.pathname;
+  const user = await requireAuth(request, env);
+  if (!user) return jsonResponse({ error: 'Unauthorized' }, 401, corsHeaders);
+
+  if (path === '/api/destinations' && request.method === 'POST') {
+    const body = await request.json();
+    const id = crypto.randomUUID();
+    await env.DB.prepare(
+      'INSERT INTO stream_destinations (id, user_id, name, platform, rtmp_url, stream_key, is_enabled) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(id, user.id, body.name, body.platform, body.rtmpUrl || null, body.streamKey || null, body.isEnabled !== false ? 1 : 0).run();
+    return jsonResponse({ id, name: body.name, platform: body.platform, isEnabled: body.isEnabled !== false }, 201, corsHeaders);
+  }
+
+  if (path === '/api/destinations' && request.method === 'GET') {
+    const { results } = await env.DB.prepare('SELECT * FROM stream_destinations WHERE user_id = ? ORDER BY created_at ASC').bind(user.id).all();
+    return jsonResponse({ destinations: results }, 200, corsHeaders);
+  }
+
+  if (path.match(/^\/api\/destinations\/[^\/]+$/) && request.method === 'PUT') {
+    const destId = path.split('/').pop();
+    const body = await request.json();
+    const updates: string[] = [];
+    const values: any[] = [];
+    if (body.name !== undefined) { updates.push('name = ?'); values.push(body.name); }
+    if (body.platform !== undefined) { updates.push('platform = ?'); values.push(body.platform); }
+    if (body.rtmpUrl !== undefined) { updates.push('rtmp_url = ?'); values.push(body.rtmpUrl); }
+    if (body.streamKey !== undefined) { updates.push('stream_key = ?'); values.push(body.streamKey); }
+    if (body.isEnabled !== undefined) { updates.push('is_enabled = ?'); values.push(body.isEnabled ? 1 : 0); }
+    if (updates.length === 0) return jsonResponse({ success: true }, 200, corsHeaders);
+    values.push(destId, user.id);
+    await env.DB.prepare(`UPDATE stream_destinations SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`).bind(...values).run();
+    return jsonResponse({ success: true }, 200, corsHeaders);
+  }
+
+  if (path.match(/^\/api\/destinations\/[^\/]+$/) && request.method === 'DELETE') {
+    const destId = path.split('/').pop();
+    await env.DB.prepare('DELETE FROM stream_destinations WHERE id = ? AND user_id = ?').bind(destId, user.id).run();
+    return jsonResponse({ success: true }, 200, corsHeaders);
+  }
+
+  return jsonResponse({ error: 'Not found' }, 404, corsHeaders);
+}
+
+async function handleStreamSessionEndpoints(request: Request, env: Env, corsHeaders: Record<string, string>): Promise<Response> {
+  const url = new URL(request.url);
+  const path = url.pathname;
+  const user = await requireAuth(request, env);
+  if (!user) return jsonResponse({ error: 'Unauthorized' }, 401, corsHeaders);
+
+  if (path === '/api/stream/sessions' && request.method === 'POST') {
+    const body = await request.json();
+    const id = crypto.randomUUID();
+    await env.DB.prepare(
+      'INSERT INTO stream_sessions (id, user_id, live_input_uid, status, platform, platform_broadcast_id) VALUES (?, ?, ?, ?, ?, ?)'
+    ).bind(id, user.id, body.liveInputUid, 'active', body.platform || null, body.platformBroadcastId || null).run();
+    return jsonResponse({ id, liveInputUid: body.liveInputUid, status: 'active', startedAt: new Date().toISOString() }, 201, corsHeaders);
+  }
+
+  if (path === '/api/stream/sessions' && request.method === 'GET') {
+    const { results } = await env.DB.prepare(
+      'SELECT * FROM stream_sessions WHERE user_id = ? AND status = ? ORDER BY started_at DESC LIMIT 1'
+    ).bind(user.id, 'active').all();
+    return jsonResponse({ session: results?.[0] || null }, 200, corsHeaders);
+  }
+
+  if (path.match(/^\/api\/stream\/sessions\/[^\/]+\/stop$/) && request.method === 'POST') {
+    const sessionId = path.split('/').slice(-2)[0];
+    await env.DB.prepare(
+      'UPDATE stream_sessions SET status = ?, ended_at = ? WHERE id = ? AND user_id = ?'
+    ).bind('ended', new Date().toISOString(), sessionId, user.id).run();
+    return jsonResponse({ success: true }, 200, corsHeaders);
+  }
+
+  return jsonResponse({ error: 'Not found' }, 404, corsHeaders);
+}
+
+async function handleScheduleEndpoints(request: Request, env: Env, corsHeaders: Record<string, string>): Promise<Response> {
+  const url = new URL(request.url);
+  const path = url.pathname;
+  const user = await requireAuth(request, env);
+  if (!user) return jsonResponse({ error: 'Unauthorized' }, 401, corsHeaders);
+
+  if (path === '/api/stream/schedule' && request.method === 'POST') {
+    const body = await request.json();
+    if (!body.title || !body.scheduledTime || !body.platform) {
+      return jsonResponse({ error: 'Missing title, scheduledTime, or platform' }, 400, corsHeaders);
+    }
+    const id = crypto.randomUUID();
+    await env.DB.prepare(
+      'INSERT INTO scheduled_streams (id, user_id, title, description, platform, platform_config, scheduled_time, duration, status, live_input_uid, event_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).bind(id, user.id, body.title, body.description || null, body.platform, JSON.stringify(body.platformConfig || {}), body.scheduledTime, body.duration || 60, 'scheduled', body.liveInputUid || null, body.eventId || null).run();
+    return jsonResponse({ id, title: body.title, platform: body.platform, scheduledTime: body.scheduledTime, status: 'scheduled' }, 201, corsHeaders);
+  }
+
+  if (path === '/api/stream/schedule' && request.method === 'GET') {
+    const status = url.searchParams.get('status') || 'scheduled';
+    const eventId = url.searchParams.get('eventId');
+    let query = 'SELECT * FROM scheduled_streams WHERE user_id = ? AND status = ?';
+    let params: any[] = [user.id, status];
+    if (eventId) {
+      query += ' AND event_id = ?';
+      params.push(eventId);
+    }
+    query += ' ORDER BY scheduled_time ASC';
+    const { results } = await env.DB.prepare(query).bind(...params).all();
+    return jsonResponse({ scheduledStreams: results }, 200, corsHeaders);
+  }
+
+  if (path.match(/^\/api\/stream\/schedule\/[^\/]+$/) && request.method === 'DELETE') {
+    const scheduleId = path.split('/').pop();
+    await env.DB.prepare('UPDATE scheduled_streams SET status = ? WHERE id = ? AND user_id = ?').bind('cancelled', scheduleId, user.id).run();
+    return jsonResponse({ success: true }, 200, corsHeaders);
+  }
+
+  if (path.match(/^\/api\/stream\/schedule\/[^\/]+\/start$/) && request.method === 'POST') {
+    const scheduleId = path.split('/').slice(-2)[0];
+    await env.DB.prepare('UPDATE scheduled_streams SET status = ? WHERE id = ? AND user_id = ?').bind('live', scheduleId, user.id).run();
+    return jsonResponse({ success: true }, 200, corsHeaders);
   }
 
   return jsonResponse({ error: 'Not found' }, 404, corsHeaders);

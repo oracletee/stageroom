@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuthStore } from '../../hooks/useAuthStore';
 import { EventCard } from './EventCard';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
+
 
 interface Event {
   id: string;
@@ -44,7 +44,7 @@ export function EventList({ onSelectEvent, onDeleteEvent, onShareEvent }: EventL
 
   const fetchEvents = async () => {
     try {
-      const url = filter ? `${API_BASE}/api/events?status=${filter}` : `${API_BASE}/api/events`;
+      const url = filter ? `/api/events?status=${filter}` : `/api/events`;
       const response = await fetch(url, {
         headers: { 'Authorization': `Bearer ${token}` },
       });

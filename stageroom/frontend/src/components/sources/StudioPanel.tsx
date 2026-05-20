@@ -1,11 +1,45 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useStreamStore } from '../../hooks/useStreamStore';
 
-export const SourcesPanel: React.FC = () => {
+type TabType = 'sources' | 'scenes' | 'destinations';
+
+export const StudioPanel: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<TabType>('sources');
+
+  return (
+    <div>
+      <div className="flex border-b border-gray-700 mb-3">
+        <button
+          onClick={() => setActiveTab('sources')}
+          className={`flex-1 py-2 text-sm font-medium ${activeTab === 'sources' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-gray-400 hover:text-gray-300'}`}
+        >
+          Sources
+        </button>
+        <button
+          onClick={() => setActiveTab('scenes')}
+          className={`flex-1 py-2 text-sm font-medium ${activeTab === 'scenes' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-gray-400 hover:text-gray-300'}`}
+        >
+          Scenes
+        </button>
+        <button
+          onClick={() => setActiveTab('destinations')}
+          className={`flex-1 py-2 text-sm font-medium ${activeTab === 'destinations' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-gray-400 hover:text-gray-300'}`}
+        >
+          Destinations
+        </button>
+      </div>
+
+      {activeTab === 'sources' && <SourcesTab />}
+      {activeTab === 'scenes' && <ScenesTab />}
+      {activeTab === 'destinations' && <DestinationsTab />}
+    </div>
+  );
+};
+
+const SourcesTab: React.FC = () => {
   const {
     sources, addSource, removeSource,
-    scenes, selectedSceneId, selectScene, addScene, removeScene, renameScene,
-    addSourceToScene, removeSourceFromScene,
+    selectedSceneId, addSourceToScene, removeSourceFromScene,
   } = useStreamStore();
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -30,17 +64,18 @@ export const SourcesPanel: React.FC = () => {
   const [ltVisible, setLtVisible] = useState(true);
   const [bgColor, setBgColor] = useState('#1a1a2e');
 
-  const selectedScene = scenes.find(s => s.id === selectedSceneId);
+  const { scenes, selectedSceneId: selSceneId } = useStreamStore();
+  const selectedScene = scenes.find(s => s.id === selSceneId);
   const sourcesInScene = selectedScene?.sourceIds || [];
 
   const isSourceInScene = (sourceId: string) => sourcesInScene.includes(sourceId);
 
   const handleToggleSourceInScene = (sourceId: string) => {
-    if (!selectedSceneId) return;
+    if (!selSceneId) return;
     if (isSourceInScene(sourceId)) {
-      removeSourceFromScene(selectedSceneId, sourceId);
+      removeSourceFromScene(selSceneId, sourceId);
     } else {
-      addSourceToScene(selectedSceneId, sourceId);
+      addSourceToScene(selSceneId, sourceId);
     }
   };
 
@@ -56,8 +91,7 @@ export const SourcesPanel: React.FC = () => {
       setRtmpError('');
 
       try {
-        
-        const response = await fetch(`/api/stream/live-input`, {
+        const response = await fetch('/api/stream/live-input', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
         });
@@ -123,79 +157,7 @@ export const SourcesPanel: React.FC = () => {
   };
 
   return (
-    <div className="bg-gray-800 rounded-lg p-4">
-      <h2 className="text-lg font-semibold mb-3">Sources</h2>
-
-      {/* Scene bar */}
-      <div className="mb-4">
-        <div className="flex items-center space-x-2 overflow-x-auto">
-          {scenes.map(scene => (
-            <div key={scene.id} className="flex items-center">
-              <button
-                onClick={() => selectScene(scene.id)}
-                className={`px-3 py-1.5 rounded-l text-sm whitespace-nowrap
-                  ${selectedSceneId === scene.id
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
-              >
-                {scene.name}
-              </button>
-              <button
-                onClick={() => {
-                  const name = prompt('Rename scene:', scene.name);
-                  if (name) renameScene(scene.id, name);
-                }}
-                className={`px-1.5 py-1.5 rounded-r text-xs border-l border-gray-600
-                  ${selectedSceneId === scene.id
-                    ? 'bg-blue-500 text-white hover:bg-blue-400'
-                    : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
-              >
-                ✏️
-              </button>
-            </div>
-          ))}
-          <button
-            onClick={async () => {
-              const presets = [
-                { name: 'Blank Scene', sources: [] as string[] },
-                { name: 'Talking Head', sources: sources.filter(s => s.type === 'camera').map(s => s.id) },
-                { name: 'Full Screen', sources: sources.filter(s => s.type === 'screen').map(s => s.id) },
-                { name: 'Picture in Picture', sources: sources.filter(s => s.type === 'screen' || s.type === 'camera').map(s => s.id) },
-                { name: 'Break Scene', sources: sources.filter(s => s.type === 'media' || s.type.includes('overlay')).map(s => s.id) },
-              ];
-              const choice = prompt(
-                `Choose a preset:\n1. Blank Scene\n2. Talking Head\n3. Full Screen\n4. Picture in Picture\n5. Break Scene\n\nEnter number or custom name:`
-              );
-              if (!choice) return;
-              const presetIdx = parseInt(choice) - 1;
-              if (presetIdx >= 0 && presetIdx < presets.length) {
-                const preset = presets[presetIdx];
-                const sceneId = await addScene(preset.name);
-                preset.sources.forEach(sid => addSourceToScene(sceneId, sid));
-              } else if (choice.trim()) {
-                addScene(choice.trim());
-              }
-            }}
-            className="px-3 py-1.5 rounded text-sm bg-green-700 hover:bg-green-600 text-white"
-          >
-            + Scene
-          </button>
-          {selectedScene && (
-            <button
-              onClick={() => {
-                if (confirm(`Remove "${selectedScene.name}"?`)) {
-                  removeScene(selectedScene.id);
-                }
-              }}
-              className="px-3 py-1.5 rounded text-sm bg-red-700 hover:bg-red-600 text-white"
-            >
-              ✕
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Add Source button */}
+    <div>
       <button
         onClick={() => setShowAddModal(true)}
         className="w-full mb-3 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition"
@@ -203,7 +165,6 @@ export const SourcesPanel: React.FC = () => {
         + Add Source
       </button>
 
-      {/* Source list */}
       <div className="space-y-2">
         {sources.map(source => {
           const hasInlineConfig = source.type === 'lower-third' || source.type === 'stage-background';
@@ -241,7 +202,7 @@ export const SourcesPanel: React.FC = () => {
                   )}
                 </div>
                 <div className="flex items-center space-x-1.5 shrink-0">
-                  {selectedSceneId && (
+                  {selSceneId && (
                     <button
                       onClick={(e) => { e.stopPropagation(); handleToggleSourceInScene(source.id); }}
                       className={`px-2 py-1 rounded text-xs
@@ -256,7 +217,7 @@ export const SourcesPanel: React.FC = () => {
                     onClick={(e) => { e.stopPropagation(); removeSource(source.id); }}
                     className="px-2 py-1 rounded text-xs bg-red-700 hover:bg-red-600 text-white"
                   >
-                    Remove
+                    ✕
                   </button>
                 </div>
               </div>
@@ -291,18 +252,6 @@ export const SourcesPanel: React.FC = () => {
                       placeholder="Role or topic"
                       className="w-full px-2 py-1 bg-gray-700 text-white rounded text-xs" />
                   </div>
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-0.5">Template</label>
-                    <select value={source.ltTemplate || 'standard'} onChange={e => {
-                      const updated = sources.map(s => s.id === source.id ? { ...s, ltTemplate: e.target.value as 'minimal' | 'standard' | 'social' } : s);
-                      useStreamStore.getState().setSources(updated);
-                    }}
-                      className="w-full px-2 py-1 bg-gray-700 text-white rounded text-xs">
-                      <option value="minimal">Minimal</option>
-                      <option value="standard">Standard</option>
-                      <option value="social">Social</option>
-                    </select>
-                  </div>
                 </div>
               )}
               {isExpanded && source.type === 'stage-background' && (
@@ -318,19 +267,6 @@ export const SourcesPanel: React.FC = () => {
                         style={{ backgroundColor: c }} />
                     ))}
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <input type="color" value={source.bgColor || '#1a1a2e'} onChange={e => {
-                      const updated = sources.map(s => s.id === source.id ? { ...s, bgColor: e.target.value } : s);
-                      useStreamStore.getState().setSources(updated);
-                    }}
-                      className="w-7 h-7 p-0.5 bg-gray-700 rounded cursor-pointer" />
-                    <input value={source.bgColor || ''} onChange={e => {
-                      const updated = sources.map(s => s.id === source.id ? { ...s, bgColor: e.target.value } : s);
-                      useStreamStore.getState().setSources(updated);
-                    }}
-                      placeholder="#hex or gradient"
-                      className="flex-1 px-2 py-1 bg-gray-700 text-white rounded text-xs" />
-                  </div>
                 </div>
               )}
             </div>
@@ -343,7 +279,6 @@ export const SourcesPanel: React.FC = () => {
         )}
       </div>
 
-      {/* Add Source Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-gray-800 rounded-lg p-6 w-96">
@@ -422,7 +357,6 @@ export const SourcesPanel: React.FC = () => {
                   )}
                   <div className="text-gray-400 text-xs">
                     A Cloudflare Stream live input will be created for RTMP ingest.
-                    The playback URL will be available once streaming starts.
                   </div>
                 </>
               )}
@@ -457,18 +391,6 @@ export const SourcesPanel: React.FC = () => {
                     <label className="block text-sm text-gray-300 mb-1">Text Color:</label>
                     <input type="color" value={overlayTextColor} onChange={e => setOverlayTextColor(e.target.value)}
                       className="w-10 h-10 p-0.5 bg-gray-700 rounded cursor-pointer" />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-gray-300 mb-1">Background:</label>
-                    <div className="flex items-center space-x-2">
-                      <input type="color" value={overlayBackgroundColor === 'transparent' ? '#000000' : overlayBackgroundColor}
-                        onChange={e => setOverlayBackgroundColor(e.target.value)}
-                        className="w-10 h-10 p-0.5 bg-gray-700 rounded cursor-pointer" />
-                      <button onClick={() => setOverlayBackgroundColor('transparent')}
-                        className={`px-3 py-1.5 rounded text-xs ${overlayBackgroundColor === 'transparent' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}>
-                        Transparent
-                      </button>
-                    </div>
                   </div>
                   <div>
                     <label className="block text-sm text-gray-300 mb-1">Position:</label>
@@ -527,13 +449,6 @@ export const SourcesPanel: React.FC = () => {
                         style={{ backgroundColor: c }} />
                     ))}
                   </div>
-                  <div className="mt-2 flex items-center space-x-2">
-                    <input type="color" value={bgColor} onChange={e => setBgColor(e.target.value)}
-                      className="w-8 h-8 p-0.5 bg-gray-700 rounded cursor-pointer" />
-                    <input value={bgColor} onChange={e => setBgColor(e.target.value)}
-                      placeholder="#hex or linear-gradient(...)"
-                      className="flex-1 px-3 py-2 bg-gray-700 text-white rounded text-xs" />
-                  </div>
                 </div>
               )}
             </div>
@@ -544,12 +459,395 @@ export const SourcesPanel: React.FC = () => {
               </button>
               <button onClick={handleAddSource} disabled={rtmpLoading}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded transition">
-                {rtmpLoading ? 'Creating RTMP Input...' : 'Add Source'}
+                {rtmpLoading ? 'Creating...' : 'Add Source'}
               </button>
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+const ScenesTab: React.FC = () => {
+  const {
+    sources, scenes, selectedSceneId, selectScene, addScene, removeScene, renameScene,
+    addSourceToScene, removeSourceFromScene,
+  } = useStreamStore();
+
+  const selectedScene = scenes.find(s => s.id === selectedSceneId);
+  const sourcesInScene = selectedScene?.sourceIds || [];
+
+  const isSourceInScene = (sourceId: string) => sourcesInScene.includes(sourceId);
+
+  const handleToggleSourceInScene = (sourceId: string) => {
+    if (!selectedSceneId) return;
+    if (isSourceInScene(sourceId)) {
+      removeSourceFromScene(selectedSceneId, sourceId);
+    } else {
+      addSourceToScene(selectedSceneId, sourceId);
+    }
+  };
+
+  return (
+    <div>
+      <div className="mb-4">
+        <div className="flex items-center space-x-2 overflow-x-auto pb-2">
+          {scenes.map(scene => (
+            <div key={scene.id} className="flex items-center">
+              <button
+                onClick={() => selectScene(scene.id)}
+                className={`px-3 py-1.5 rounded-l text-sm whitespace-nowrap
+                  ${selectedSceneId === scene.id
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+              >
+                {scene.name}
+              </button>
+              <button
+                onClick={() => {
+                  const name = prompt('Rename scene:', scene.name);
+                  if (name) renameScene(scene.id, name);
+                }}
+                className={`px-1.5 py-1.5 rounded-r text-xs border-l border-gray-600
+                  ${selectedSceneId === scene.id
+                    ? 'bg-blue-500 text-white hover:bg-blue-400'
+                    : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
+              >
+                ✏️
+              </button>
+            </div>
+          ))}
+          <button
+            onClick={async () => {
+              const presets = [
+                { name: 'Blank Scene', sources: [] as string[] },
+                { name: 'Talking Head', sources: sources.filter(s => s.type === 'camera').map(s => s.id) },
+                { name: 'Full Screen', sources: sources.filter(s => s.type === 'screen').map(s => s.id) },
+                { name: 'Picture in Picture', sources: sources.filter(s => s.type === 'screen' || s.type === 'camera').map(s => s.id) },
+                { name: 'Break Scene', sources: sources.filter(s => s.type === 'media' || s.type.includes('overlay')).map(s => s.id) },
+              ];
+              const choice = prompt(
+                `Choose a preset:\n1. Blank Scene\n2. Talking Head\n3. Full Screen\n4. Picture in Picture\n5. Break Scene\n\nEnter number or custom name:`
+              );
+              if (!choice) return;
+              const presetIdx = parseInt(choice) - 1;
+              if (presetIdx >= 0 && presetIdx < presets.length) {
+                const preset = presets[presetIdx];
+                const sceneId = await addScene(preset.name);
+                preset.sources.forEach(sid => addSourceToScene(sceneId, sid));
+              } else if (choice.trim()) {
+                addScene(choice.trim());
+              }
+            }}
+            className="px-3 py-1.5 rounded text-sm bg-green-700 hover:bg-green-600 text-white"
+          >
+            + Scene
+          </button>
+          {selectedScene && (
+            <button
+              onClick={() => {
+                if (confirm(`Remove "${selectedScene.name}"?`)) {
+                  removeScene(selectedScene.id);
+                }
+              }}
+              className="px-3 py-1.5 rounded text-sm bg-red-700 hover:bg-red-600 text-white"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        {sources.map(source => (
+          <div key={source.id}
+            className={`flex items-center justify-between p-2.5 rounded bg-gray-900
+              ${isSourceInScene(source.id) ? 'border-l-4 border-blue-500' : 'border-l-4 border-transparent'}`}>
+            <div className="flex items-center space-x-3 min-w-0">
+              <span className="text-lg shrink-0">
+                {source.type === 'camera' ? '📹'
+                  : source.type === 'screen' ? '🖥️'
+                  : source.type === 'media' ? '🎬'
+                  : source.type === 'ndi' ? '📡'
+                  : source.type === 'rtmp' ? '📡'
+                  : source.type === 'lower-third' ? '💬'
+                  : source.type === 'stage-background' ? '🎨'
+                  : source.type.includes('text') ? '🔤'
+                  : source.type.includes('image') ? '🖼️'
+                  : source.type.includes('animated') ? '✨'
+                  : '❓'}
+              </span>
+              <div className="min-w-0">
+                <p className="font-medium text-sm truncate">{source.label}</p>
+                <p className="text-xs text-gray-400">{source.type}</p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-1.5 shrink-0">
+              {selectedSceneId && (
+                <button
+                  onClick={() => handleToggleSourceInScene(source.id)}
+                  className={`px-2 py-1 rounded text-xs
+                    ${isSourceInScene(source.id)
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
+                >
+                  {isSourceInScene(source.id) ? 'In Scene' : '+ Scene'}
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+        {sources.length === 0 && (
+          <p className="text-gray-500 text-sm text-center py-4">
+            No sources available. Add sources in the Sources tab first.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const DestinationsTab: React.FC = () => {
+  const { destinations, setDestinations, toggleDestination } = useStreamStore();
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formData, setFormData] = useState({
+    name: '',
+    platform: 'youtube' as string,
+    rtmpUrl: '',
+    streamKey: '',
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    loadDestinations();
+  }, []);
+
+  const loadDestinations = async () => {
+    try {
+      const res = await fetch('/api/destinations');
+      if (res.ok) {
+        const data = await res.json();
+        const dests = (data.destinations || []).map((d: any) => ({
+          ...d,
+          isEnabled: d.is_enabled === 1,
+        }));
+        setDestinations(dests);
+      }
+    } catch (err) {
+      console.error('Failed to load destinations:', err);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!formData.name) {
+      setError('Name is required');
+      return;
+    }
+    if (!formData.rtmpUrl || !formData.streamKey) {
+      setError('RTMP URL and Stream Key are required');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError('');
+
+    try {
+      if (editingId) {
+        await fetch(`/api/destinations/${editingId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: formData.name,
+            platform: formData.platform,
+            rtmpUrl: formData.rtmpUrl || null,
+            streamKey: formData.streamKey || null,
+          }),
+        });
+      } else {
+        await fetch('/api/destinations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: formData.name,
+            platform: formData.platform,
+            rtmpUrl: formData.rtmpUrl || null,
+            streamKey: formData.streamKey || null,
+          }),
+        });
+      }
+
+      await loadDestinations();
+      setShowAddForm(false);
+      setEditingId(null);
+      setFormData({ name: '', platform: 'youtube', rtmpUrl: '', streamKey: '' });
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Remove this destination?')) return;
+    try {
+      await fetch(`/api/destinations/${id}`, { method: 'DELETE' });
+      await loadDestinations();
+    } catch (err) {
+      console.error('Failed to delete destination:', err);
+    }
+  };
+
+  const handleEdit = (dest: (typeof destinations)[0]) => {
+    setEditingId(dest.id);
+    setFormData({
+      name: dest.name,
+      platform: dest.platform,
+      rtmpUrl: dest.rtmpUrl || '',
+      streamKey: dest.streamKey || '',
+    });
+    setShowAddForm(true);
+  };
+
+  const platformIcons: Record<string, string> = {
+    youtube: '▶️',
+    twitch: '🎮',
+    facebook: '📘',
+    'custom-rtmp': '📡',
+  };
+
+  const enabledCount = destinations.filter(d => d.isEnabled).length;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-lg font-semibold">Streaming Destinations</h2>
+          <p className="text-xs text-gray-400">
+            {enabledCount} of {destinations.length} enabled
+          </p>
+        </div>
+        <button
+          onClick={() => {
+            setShowAddForm(true);
+            setEditingId(null);
+            setFormData({ name: '', platform: 'youtube', rtmpUrl: '', streamKey: '' });
+          }}
+          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm"
+        >
+          + Add
+        </button>
+      </div>
+
+      {error && (
+        <div className="mb-3 p-2 bg-red-900/20 border border-red-500 rounded text-red-400 text-xs">
+          {error}
+        </div>
+      )}
+
+      {showAddForm && (
+        <div className="mb-4 p-3 bg-gray-900 rounded space-y-3">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Name</label>
+            <input
+              value={formData.name}
+              onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
+              className="w-full px-2 py-1.5 bg-gray-700 text-white rounded text-sm"
+              placeholder="My YouTube Channel"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Platform</label>
+            <select
+              value={formData.platform}
+              onChange={e => setFormData(prev => ({ ...prev, platform: e.target.value }))}
+              className="w-full px-2 py-1.5 bg-gray-700 text-white rounded text-sm"
+            >
+              <option value="youtube">YouTube</option>
+              <option value="twitch">Twitch</option>
+              <option value="facebook">Facebook</option>
+              <option value="custom-rtmp">Custom RTMP</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">RTMP URL</label>
+            <input
+              value={formData.rtmpUrl}
+              onChange={e => setFormData(prev => ({ ...prev, rtmpUrl: e.target.value }))}
+              className="w-full px-2 py-1.5 bg-gray-700 text-white rounded text-sm"
+              placeholder="rtmp://..."
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Stream Key</label>
+            <input
+              value={formData.streamKey}
+              onChange={e => setFormData(prev => ({ ...prev, streamKey: e.target.value }))}
+              className="w-full px-2 py-1.5 bg-gray-700 text-white rounded text-sm"
+              placeholder="Stream key"
+            />
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowAddForm(false)}
+              className="flex-1 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSubmit}
+              disabled={isSubmitting}
+              className="flex-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded text-sm"
+            >
+              {isSubmitting ? 'Saving...' : editingId ? 'Update' : 'Add'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {destinations.map(dest => (
+          <div
+            key={dest.id}
+            className={`flex items-center justify-between p-2.5 rounded ${dest.isEnabled ? 'bg-gray-900 border-l-4 border-green-500' : 'bg-gray-900/50 border-l-4 border-gray-600'}`}
+          >
+            <div className="flex items-center space-x-3 min-w-0">
+              <span className="text-lg">{platformIcons[dest.platform] || '📡'}</span>
+              <div className="min-w-0">
+                <p className="font-medium text-sm truncate">{dest.name}</p>
+                <p className="text-xs text-gray-400">{dest.platform}</p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-2 shrink-0">
+              <button
+                onClick={() => toggleDestination(dest.id)}
+                className={`px-2 py-1 rounded text-xs ${dest.isEnabled ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
+              >
+                {dest.isEnabled ? 'ON' : 'OFF'}
+              </button>
+              <button
+                onClick={() => handleEdit(dest)}
+                className="px-2 py-1 rounded text-xs bg-gray-700 text-gray-400 hover:bg-gray-600"
+              >
+                ✏️
+              </button>
+              <button
+                onClick={() => handleDelete(dest.id)}
+                className="px-2 py-1 rounded text-xs bg-red-700 hover:bg-red-600 text-white"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        ))}
+        {destinations.length === 0 && (
+          <p className="text-gray-500 text-sm text-center py-4">
+            No destinations yet. Add YouTube, Twitch, Facebook, or Custom RTMP.
+          </p>
+        )}
+      </div>
     </div>
   );
 };

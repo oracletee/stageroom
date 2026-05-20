@@ -1,7 +1,7 @@
 import './App.css';
 import Layout from './components/layout/Layout';
 import { VideoPreview } from './components/preview/VideoPreview';
-import { SourcesPanel } from './components/sources/SourcesPanel';
+import { StudioPanel } from './components/sources/StudioPanel';
 import { Backstage } from './components/guests/Backstage';
 import { AudioMixer } from './components/audio/AudioMixer';
 import { UnifiedChat } from './components/chat/UnifiedChat';
@@ -13,15 +13,14 @@ import { LiveKitProvider } from './components/stage/LiveKitProvider';
 import { useStreamStore } from './hooks/useStreamStore';
 import { useAuthStore } from './hooks/useAuthStore';
 import { AuthPage } from './components/auth/AuthPage';
-import { EventForm } from './components/events/EventForm';
 import { EventList } from './components/events/EventList';
 import { EventDetail } from './components/events/EventDetail';
 import { GuestRegistration } from './components/guests/GuestRegistration';
-import { AnalyticsDashboard } from './components/analytics/AnalyticsDashboard';
 import { DashboardView } from './components/dashboard/DashboardView';
-import { TeamCollaboration } from './components/team/TeamCollaboration';
 import { SetupModal } from './components/events/SetupModal';
 import { ShareModal } from './components/events/ShareModal';
+import { ScheduleStreamSidebar } from './components/events/ScheduleStreamSidebar';
+import * as studioApi from './api/studio';
 
 interface EventData {
   id: string;
@@ -49,7 +48,20 @@ function AppContent() {
   const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
-    checkAuth().then(() => setInitialized(true));
+    checkAuth().then(async () => {
+      const currentUser = useAuthStore.getState().user;
+      if (currentUser) {
+        const data = await studioApi.loadStudioConfig();
+        if (data && (data.scenes?.length || data.sources?.length)) {
+          useStreamStore.getState().loadFromDb(data);
+        } else {
+          const defaultSceneId = `scene_${Date.now()}`;
+          await useStreamStore.getState().addScene('Scene 1', defaultSceneId);
+          useStreamStore.setState({ selectedSceneId: defaultSceneId });
+        }
+      }
+      setInitialized(true);
+    });
   }, []);
 
   useEffect(() => {
@@ -104,20 +116,7 @@ function AppContent() {
   if (appView === 'events') {
     return (
       <Layout>
-        {showCreateEvent ? (
-          <div className="max-w-2xl mx-auto p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-white">Create Scheduled Event</h2>
-              <button onClick={() => setShowCreateEvent(false)} className="text-sm text-blue-400 hover:underline">
-                ← Back to Events
-              </button>
-            </div>
-            <EventForm
-              onSuccess={() => setShowCreateEvent(false)}
-              onCancel={() => setShowCreateEvent(false)}
-            />
-          </div>
-        ) : selectedEventId ? (
+        {selectedEventId ? (
           <EventDetail
             eventId={selectedEventId}
             onBack={() => setSelectedEventId(null)}
@@ -131,7 +130,7 @@ function AppContent() {
                 onClick={() => setShowCreateEvent(true)}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
               >
-                + New Event
+                + Schedule Stream
               </button>
             </div>
             <EventList
@@ -140,7 +139,7 @@ function AppContent() {
                 if (!confirm('Delete this event?')) return;
                 try {
                   const token = useAuthStore.getState().token;
-                  await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/events/${id}`, {
+                  await fetch(`/api/events/${id}`, {
                     method: 'DELETE',
                     headers: { 'Authorization': `Bearer ${token}` },
                   });
@@ -153,6 +152,15 @@ function AppContent() {
             />
           </div>
         )}
+
+        <ScheduleStreamSidebar
+          isOpen={showCreateEvent}
+          onClose={() => setShowCreateEvent(false)}
+          onSuccess={() => {
+            setShowCreateEvent(false);
+            window.location.reload();
+          }}
+        />
       </Layout>
     );
   }
@@ -171,7 +179,7 @@ function AppContent() {
         <VideoPreview />
         <div className="flex flex-col lg:flex-row gap-4">
           <div className="w-full lg:w-[70%] flex flex-col gap-4">
-            <SourcesPanel />
+            <StudioPanel />
             <div className="flex flex-col md:flex-row gap-4">
               <div className="w-full md:w-1/2">
                 <AudioMixer compact />

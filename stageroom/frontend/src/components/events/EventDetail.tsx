@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuthStore } from '../../hooks/useAuthStore';
 import { QRCodeSVG } from 'qrcode.react';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
+
 
 interface EventDetailProps {
   eventId: string;
@@ -24,8 +24,8 @@ export function EventDetail({ eventId, onBack, onShare }: EventDetailProps) {
   const fetchEvent = async () => {
     try {
       const [eventRes, ticketRes] = await Promise.all([
-        fetch(`${API_BASE}/api/events/${eventId}`, { headers: { 'Authorization': `Bearer ${token}` } }),
-        fetch(`${API_BASE}/api/events/${eventId}/ticket-types`, { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch(`/api/events/${eventId}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch(`/api/events/${eventId}/ticket-types`, { headers: { 'Authorization': `Bearer ${token}` } }),
       ]);
       const eventData = await eventRes.json();
       let ticketData = { ticket_types: [] };
@@ -265,7 +265,7 @@ function GuestList({ eventId }: { eventId: string }) {
 
   const fetchGuests = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/guests/event/${eventId}`, {
+      const response = await fetch(`/api/guests/event/${eventId}`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       const data = await response.json();
@@ -325,7 +325,7 @@ function DonationList({ eventId }: { eventId: string }) {
 
   const fetchDonations = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/donations/event/${eventId}`, {
+      const response = await fetch(`/api/donations/event/${eventId}`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       const data = await response.json();
@@ -408,7 +408,7 @@ function RevenueSummary({ eventId }: { eventId: string }) {
 
   const fetchRevenue = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/payments/event/${eventId}`, {
+      const response = await fetch(`/api/payments/event/${eventId}`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       const data = await response.json();

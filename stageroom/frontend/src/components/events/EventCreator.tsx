@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useAuthStore } from '../../hooks/useAuthStore';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
+
 
 interface EventFormData {
   title: string;
@@ -48,7 +48,7 @@ export function EventCreator({ onSuccess, onCancel }: EventCreatorProps) {
     setError('');
 
     try {
-      const response = await fetch(`${API_BASE}/api/events`, {
+      const response = await fetch(`/api/events`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -73,7 +73,7 @@ export function EventCreator({ onSuccess, onCancel }: EventCreatorProps) {
       }
 
       if (formData.enable_donations) {
-        await fetch(`${API_BASE}/api/events/${data.event.id}/donation-config`, {
+        await fetch(`/api/events/${data.event.id}/donation-config`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',

@@ -1,28 +1,61 @@
 import { useStreamStore, type StageMode } from '../../hooks/useStreamStore';
 import { useLiveKit } from './LiveKitProvider';
-import { StageSlot } from './StageSlot';
+import { SourceRenderer } from '../sources/SourceRenderer';
 
 interface StageCompositionProps {
   variant: 'preview' | 'program';
 }
 
 export const StageComposition: React.FC<StageCompositionProps> = ({ variant }) => {
-  const { stageMode, spotlightParticipants, lyricText, sources, selectedSceneId, programSceneId, lowerThird, stageBackground } = useStreamStore();
+  const { stageMode, spotlightParticipants, lyricText, sources, selectedSceneId, programSceneId, programSnapshot, lowerThird, stageBackground } = useStreamStore();
   const { localStream, participantStreams } = useLiveKit();
 
-  const sceneId = variant === 'preview' ? selectedSceneId : (programSceneId || selectedSceneId);
-  const scene = useStreamStore.getState().scenes.find(s => s.id === sceneId);
-  const activeSourceIds = scene?.sourceIds || [];
+  let activeSources: typeof sources;
+  let videoSources: typeof sources;
+  let textOverlays: typeof sources;
+  let lowerThirdSource: typeof sources[0] | undefined;
+  let bgSource: typeof sources[0] | undefined;
 
-  const textOverlays = sources.filter(s => activeSourceIds.includes(s.id) && s.type === 'text-overlay' && s.isActive !== false);
-  const lowerThirdSource = sources.find(s => activeSourceIds.includes(s.id) && s.type === 'lower-third' && s.isActive !== false);
-  const bgSource = sources.find(s => activeSourceIds.includes(s.id) && s.type === 'stage-background' && s.isActive !== false);
-  const screenSources = sources.filter(s => activeSourceIds.includes(s.id) && s.type === 'screen');
-  const screenStream = null;
+  if (variant === 'program' && programSnapshot) {
+    const ordered = programSnapshot.sources
+      .map(s => (s.isActive !== false ? s : null))
+      .filter((s): s is typeof programSnapshot.sources[0] => s !== null);
+    activeSources = ordered;
+    videoSources = ordered.filter(s => ['camera', 'screen', 'media'].includes(s.type));
+    textOverlays = ordered.filter(s => s.type === 'text-overlay');
+    lowerThirdSource = ordered.find(s => s.type === 'lower-third');
+    bgSource = ordered.find(s => s.type === 'stage-background');
+  } else if (variant === 'preview') {
+    const scene = useStreamStore.getState().scenes.find(s => s.id === selectedSceneId);
+    const orderedSourceIds = scene?.sourceIds || [];
+    const liveActive = orderedSourceIds
+      .map(id => sources.find(s => s.id === id))
+      .filter((s): s is typeof sources[0] => s !== undefined && s.isActive !== false);
+    activeSources = liveActive;
+    videoSources = liveActive.filter(s => ['camera', 'screen', 'media'].includes(s.type));
+    textOverlays = liveActive.filter(s => s.type === 'text-overlay');
+    lowerThirdSource = liveActive.find(s => s.type === 'lower-third');
+    bgSource = liveActive.find(s => s.type === 'stage-background');
+  } else {
+    activeSources = [];
+    videoSources = [];
+    textOverlays = [];
+    lowerThirdSource = undefined;
+    bgSource = undefined;
+  }
 
-  const spotlightedStreams = spotlightParticipants
-    .map(id => ({ identity: id, stream: participantStreams.get(id) || null }))
-    .filter(s => s.stream);
+  if (variant === 'program' && !programSnapshot) {
+    return (
+      <div className="relative w-full h-full overflow-hidden bg-gray-900">
+        <div className="absolute inset-0 flex items-center justify-center text-gray-500 text-sm">
+          Nothing on Program
+        </div>
+        <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-red-600/80 text-white text-[10px] rounded z-50">
+          PROGRAM
+        </div>
+      </div>
+    );
+  }
 
   const positionClasses: Record<string, string> = {
     'top-left': 'top-4 left-4',
@@ -38,6 +71,87 @@ export const StageComposition: React.FC<StageCompositionProps> = ({ variant }) =
     small: 'text-sm',
     medium: 'text-lg',
     large: 'text-3xl',
+  };
+
+  const renderVideoSources = () => {
+    if (videoSources.length === 0) {
+      return (
+        <div className="absolute inset-0 flex items-center justify-center text-gray-500 text-sm">
+          No active sources in scene
+        </div>
+      );
+    }
+
+    const isReadOnly = variant === 'program';
+
+    if (videoSources.length === 1) {
+      return (
+        <SourceRenderer
+          sourceId={videoSources[0].id}
+          type={videoSources[0].type}
+          label={videoSources[0].label}
+          previewUrl={videoSources[0].previewUrl}
+          playbackUrl={videoSources[0].playbackUrl}
+          style={{ top: '0', left: '0', width: '100%', height: '100%' }}
+          zIndex={1}
+          readOnly={isReadOnly}
+        />
+      );
+    }
+
+    if (videoSources.length === 2) {
+      return (
+        <>
+          <SourceRenderer
+            sourceId={videoSources[0].id}
+            type={videoSources[0].type}
+            label={videoSources[0].label}
+            previewUrl={videoSources[0].previewUrl}
+            playbackUrl={videoSources[0].playbackUrl}
+            style={{ top: '0', left: '0', width: '50%', height: '100%' }}
+            zIndex={1}
+            readOnly={isReadOnly}
+          />
+          <SourceRenderer
+            sourceId={videoSources[1].id}
+            type={videoSources[1].type}
+            label={videoSources[1].label}
+            previewUrl={videoSources[1].previewUrl}
+            playbackUrl={videoSources[1].playbackUrl}
+            style={{ top: '0', left: '50%', width: '50%', height: '100%' }}
+            zIndex={1}
+            readOnly={isReadOnly}
+          />
+        </>
+      );
+    }
+
+    const positions = [
+      { top: '0', left: '0', width: '50%', height: '50%' },
+      { top: '0', left: '50%', width: '50%', height: '50%' },
+      { top: '50%', left: '0', width: '50%', height: '50%' },
+      { top: '50%', left: '50%', width: '50%', height: '50%' },
+      { top: '0', left: '0', width: '33.33%', height: '50%' },
+      { top: '0', left: '33.33%', width: '33.33%', height: '50%' },
+    ];
+
+    return (
+      <>
+        {videoSources.slice(0, 6).map((source, i) => (
+          <SourceRenderer
+            key={source.id}
+            sourceId={source.id}
+            type={source.type}
+            label={source.label}
+            previewUrl={source.previewUrl}
+            playbackUrl={source.playbackUrl}
+            style={positions[i]}
+            zIndex={1}
+            readOnly={isReadOnly}
+          />
+        ))}
+      </>
+    );
   };
 
   const renderTextOverlays = () => (
@@ -93,154 +207,6 @@ export const StageComposition: React.FC<StageCompositionProps> = ({ variant }) =
     );
   };
 
-  const renderTedTalk = () => (
-    <StageSlot stream={localStream} label="Camera" style={{ top: '0', left: '0', width: '100%', height: '100%' }} />
-  );
-
-  const renderPodcast = () => {
-    const feeds = [
-      { identity: 'Host', stream: localStream },
-      ...spotlightedStreams,
-    ].slice(0, 4);
-
-    if (feeds.length === 0) {
-      return <div className="flex items-center justify-center h-full text-gray-500 text-sm">No sources</div>;
-    }
-
-    const positions = [
-      { top: '0', left: '0', width: '50%', height: feeds.length > 2 ? '50%' : '100%' },
-      { top: '0', left: '50%', width: '50%', height: feeds.length > 2 ? '50%' : '100%' },
-      { top: '50%', left: '0', width: '50%', height: '50%' },
-      { top: '50%', left: '50%', width: '50%', height: '50%' },
-    ];
-
-    return (
-      <>
-        {feeds.map((feed, i) => (
-          <StageSlot key={feed.identity} stream={feed.stream} label={feed.identity} style={positions[i]} />
-        ))}
-      </>
-    );
-  };
-
-  const renderEvent = () => {
-    const reactionSlots = spotlightedStreams.slice(0, 2);
-    return (
-      <>
-        <StageSlot stream={localStream} label="Stage" style={{ top: '0', left: '0', width: '100%', height: '100%' }} />
-        <div className="absolute" style={{ top: '65%', left: '68%', width: '32%', height: '35%', zIndex: 2 }}>
-          <div className="grid grid-cols-2 gap-0.5 w-full h-full">
-            {reactionSlots.length > 0 ? reactionSlots.map(s => (
-              <StageSlot key={s.identity} stream={s.stream} label={s.identity}
-                style={{ top: '0', left: '0', width: '100%', height: '100%' }} />
-            )) : (
-              <>
-                <div className="bg-gray-800/60 rounded flex items-center justify-center text-[10px] text-gray-500">Reaction</div>
-                <div className="bg-gray-800/60 rounded flex items-center justify-center text-[10px] text-gray-500">Reaction</div>
-              </>
-            )}
-          </div>
-        </div>
-      </>
-    );
-  };
-
-  const renderWorship = () => (
-    <>
-      <StageSlot stream={localStream} label="Camera" style={{ top: '68%', left: '68%', width: '32%', height: '32%' }} zIndex={2} />
-      <div className="absolute" style={{ top: '0', left: '0', width: '68%', height: '100%', zIndex: 1 }}>
-        {localStream && (
-          <video autoPlay muted playsInline ref={el => { if (el && localStream) el.srcObject = localStream; el?.play().catch(() => {}); }}
-            className="w-full h-full object-cover absolute inset-0" />
-        )}
-        {lyricText && (
-          <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-10">
-            <p className="text-white text-2xl md:text-3xl font-bold text-center px-8 leading-relaxed">{lyricText}</p>
-          </div>
-        )}
-      </div>
-      {spotlightedStreams.length > 0 && (
-        <div className="absolute" style={{ top: '68%', left: '0', width: '32%', height: '32%', zIndex: 2 }}>
-          <div className="grid grid-cols-2 gap-0.5 w-full h-full">
-            {spotlightedStreams.map(s => (
-              <StageSlot key={s.identity} stream={s.stream} label={s.identity}
-                style={{ top: '0', left: '0', width: '100%', height: '100%' }} />
-            ))}
-          </div>
-        </div>
-      )}
-    </>
-  );
-
-  const renderClassroom = () => (
-    <>
-      <StageSlot stream={screenStream} label="Screen Share" style={{ top: '0', left: '0', width: '60%', height: '85%' }} />
-      <StageSlot stream={localStream} label="Teacher" style={{ top: '0', left: '60%', width: '40%', height: '85%' }} />
-      {spotlightedStreams.length > 0 && (
-        <div className="absolute flex" style={{ bottom: '0', left: '0', width: '100%', height: '15%', zIndex: 2 }}>
-          <div className="flex w-full h-full gap-0.5">
-            {spotlightedStreams.map(s => (
-              <StageSlot key={s.identity} stream={s.stream} label={s.identity}
-                style={{ top: '0', left: '0', width: '100%', height: '100%' }} />
-            ))}
-          </div>
-        </div>
-      )}
-    </>
-  );
-
-  const renderDebate = () => {
-    const speakers = [
-      { identity: 'Speaker 1', stream: localStream },
-      ...spotlightedStreams.slice(0, 1),
-    ];
-    return (
-      <>
-        {speakers.length >= 1 && (
-          <StageSlot stream={speakers[0].stream} label={speakers[0].identity}
-            style={{ top: '0', left: '0', width: speakers.length > 1 ? '50%' : '100%', height: '100%' }} />
-        )}
-        {speakers.length >= 2 && (
-          <StageSlot stream={speakers[1].stream} label={speakers[1].identity}
-            style={{ top: '0', left: '50%', width: '50%', height: '100%' }} />
-        )}
-      </>
-    );
-  };
-
-  const renderFilmPremiere = () => {
-    const reactionSlots = spotlightedStreams.slice(0, 2);
-    return (
-      <>
-        <StageSlot stream={localStream} label="Film" style={{ top: '0', left: '0', width: '100%', height: '100%' }} />
-        <StageSlot stream={null} label="Host" style={{ top: '72%', left: '2%', width: '18%', height: '26%' }} zIndex={2} />
-        <div className="absolute" style={{ top: '72%', left: '21%', width: '36%', height: '26%', zIndex: 2 }}>
-          <div className="grid grid-cols-2 gap-0.5 w-full h-full">
-            {reactionSlots.length > 0 ? reactionSlots.map(s => (
-              <StageSlot key={s.identity} stream={s.stream} label={s.identity}
-                style={{ top: '0', left: '0', width: '100%', height: '100%' }} />
-            )) : (
-              <>
-                <div className="bg-gray-800/60 rounded flex items-center justify-center text-[10px] text-gray-500">Reaction</div>
-                <div className="bg-gray-800/60 rounded flex items-center justify-center text-[10px] text-gray-500">Reaction</div>
-              </>
-            )}
-          </div>
-        </div>
-      </>
-    );
-  };
-
-  const renderers: Record<StageMode, () => React.ReactNode> = {
-    'ted-talk': renderTedTalk,
-    'podcast': renderPodcast,
-    'event': renderEvent,
-    'worship': renderWorship,
-    'classroom': renderClassroom,
-    'debate': renderDebate,
-    'film-premiere': renderFilmPremiere,
-  };
-
   return (
     <div
       className="relative w-full h-full overflow-hidden"
@@ -249,12 +215,17 @@ export const StageComposition: React.FC<StageCompositionProps> = ({ variant }) =
         ...((bgSource?.bgColor || stageBackground)?.startsWith('linear-gradient') ? { backgroundImage: bgSource?.bgColor || stageBackground } : {}),
       }}
     >
-      {renderers[stageMode]()}
+      {renderVideoSources()}
       {renderTextOverlays()}
       {renderLowerThird()}
       {variant === 'preview' && (
         <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-blue-600/80 text-white text-[10px] rounded z-50">
           PREVIEW
+        </div>
+      )}
+      {variant === 'program' && (
+        <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-red-600/80 text-white text-[10px] rounded z-50">
+          PROGRAM
         </div>
       )}
     </div>

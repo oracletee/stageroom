@@ -152,4 +152,6 @@ export interface Env {
   PAYSTACK_PUBLIC_KEY: string;
   R2_BUCKET_NAME: string;
   R2_PUBLIC_URL: string;
+  CLOUDFLARE_ACCOUNT_ID: string;
+  CLOUDFLARE_API_TOKEN: string;
 }

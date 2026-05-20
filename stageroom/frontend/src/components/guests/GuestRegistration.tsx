@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAuthStore } from '../../hooks/useAuthStore';
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
+
 
 interface GuestRegistrationProps {
   eventId: string;
@@ -21,7 +21,7 @@ export function GuestRegistration({ eventId, onSuccess }: GuestRegistrationProps
     setError('');
 
     try {
-      const response = await fetch(`${API_BASE}/api/guests/register`, {
+      const response = await fetch(`/api/guests/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ event_id: eventId, name, email }),

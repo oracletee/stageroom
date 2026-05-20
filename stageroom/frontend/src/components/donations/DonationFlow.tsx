@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore } from '../../hooks/useAuthStore';
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
+
 
 interface DonationFlowProps {
   eventId: string;
@@ -26,7 +26,7 @@ export function DonationFlow({ eventId, onSuccess, onClose }: DonationFlowProps)
 
   const fetchConfig = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/events/${eventId}`);
+      const response = await fetch(`/api/events/${eventId}`);
       const data = await response.json();
       if (response.ok && data.donation_config?.enabled) {
         setConfig(data.donation_config);
@@ -65,7 +65,7 @@ export function DonationFlow({ eventId, onSuccess, onClose }: DonationFlowProps)
     setError('');
 
     try {
-      const response = await fetch(`${API_BASE}/api/donations/paystack/initialize`, {
+      const response = await fetch(`/api/donations/paystack/initialize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
