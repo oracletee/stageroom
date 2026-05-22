@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { useStreamStore, type StageMode } from '../../hooks/useStreamStore';
 import { StageComposition } from '../stage/StageComposition';
 import { useLiveKit } from '../stage/LiveKitProvider';
+import { StreamCompositor } from '../stream/StreamCompositor';
 
 const modeConfig: Record<StageMode, { accent: string; layout: 'side' | 'stacked' | 'program-dominant'; label: string }> = {
   'ted-talk': { accent: 'border-amber-500', layout: 'side', label: 'TED Talk — Speaker Focused' },
@@ -13,12 +15,12 @@ const modeConfig: Record<StageMode, { accent: string; layout: 'side' | 'stacked'
 };
 
 export const VideoPreview: React.FC = () => {
-  const { selectedSceneId, programSceneId, programSnapshot, pushToProgram, isStreaming, setStreaming, isRecording, setRecording, stageMode, streamSession, setStreamSession, destinations, scenes } = useStreamStore();
+  const { selectedSceneId, programSceneId, programSnapshot, pushToProgram, isStreaming, setStreaming, stageMode, streamSession, setStreamSession, destinations, scenes, setupDone } = useStreamStore();
   const { connected, connectionState } = useLiveKit();
+  const [whipError, setWhipError] = useState<string | null>(null);
 
   const config = modeConfig[stageMode];
-  const enabledCount = destinations.filter(d => d.isEnabled).length;
-  const canGoLive = enabledCount > 0;
+  const canGoLive = setupDone;
 
   const previewSceneName = scenes.find(s => s.id === selectedSceneId)?.name;
   const programSceneName = programSnapshot
@@ -26,36 +28,67 @@ export const VideoPreview: React.FC = () => {
     : undefined;
 
   const handleGoLive = async () => {
+    setWhipError(null);
     if (isStreaming) {
+      if (streamSession?.liveInputUid) {
+        try {
+          await fetch(`/api/stream/live-input/${streamSession.liveInputUid}/recording`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: false }),
+          });
+        } catch (err) {
+          console.error('Failed to stop stream:', err);
+        }
+      }
       setStreaming(false);
       setStreamSession(null);
     } else {
       if (!programSceneId) pushToProgram();
 
       try {
-        
         const response = await fetch(`/api/stream/live-input`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
         });
 
         if (!response.ok) {
-          throw new Error('Failed to create live input');
+          let errMsg = 'Failed to create live input';
+          try { const err = await response.json(); errMsg = err.error || errMsg; } catch {}
+          throw new Error(errMsg);
         }
 
-        const data = await response.json();
-        setStreamSession({ liveInputUid: data.uid, startedAt: new Date().toISOString() });
+        let data: any;
+        try { data = await response.json(); } catch {
+          throw new Error('Invalid response from server');
+        }
+        console.log('[VideoPreview] Live input created:', data.uid, 'webRTC:', JSON.stringify(data.webRTC));
+        const whipUrl = data.webRTC?.url;
+        const whipToken = data.webRTC?.token;
+
+        try {
+          const recRes = await fetch(`/api/stream/live-input/${data.uid}/recording`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: true }),
+          });
+          if (!recRes.ok) {
+            const recErr = await recRes.json().catch(() => ({}));
+            console.warn('[VideoPreview] Recording PUT returned', recRes.status, recErr);
+          } else {
+            console.log('[VideoPreview] Recording enabled');
+          }
+        } catch (err) {
+          console.error('[VideoPreview] Failed to start recording:', err);
+        }
+
+        setStreamSession({ liveInputUid: data.uid, whipUrl, whipToken, startedAt: new Date().toISOString() });
         setStreaming(true);
       } catch (err: any) {
         console.error('Failed to start stream:', err);
         setStreamSession({ error: err.message });
-        setStreaming(true);
       }
     }
-  };
-
-  const handleRecord = async () => {
-    setRecording(!isRecording);
   };
 
   const connectionColor = connected ? 'bg-green-500' : connectionState === 'connecting' ? 'bg-yellow-500' : connectionState === 'failed' || connectionState === 'disconnected' ? 'bg-red-500' : 'bg-gray-500';
@@ -81,35 +114,35 @@ export const VideoPreview: React.FC = () => {
   );
 
   const renderControls = () => (
-    <div className="mt-2 flex gap-2">
+    <div className="mt-2">
       <button onClick={handleGoLive} disabled={!canGoLive && !isStreaming}
-        className={`flex-1 px-4 py-2 rounded text-sm font-semibold transition ${!canGoLive && !isStreaming ? 'bg-gray-600 text-gray-400 cursor-not-allowed' : isStreaming ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-green-600 hover:bg-green-700 text-white'}`}>
+        className={`w-full px-4 py-2 rounded text-sm font-semibold transition ${!canGoLive && !isStreaming ? 'bg-gray-600 text-gray-400 cursor-not-allowed' : isStreaming ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-green-600 hover:bg-green-700 text-white'}`}>
         {isStreaming ? '■ Stop' : '● Go Live'}
-      </button>
-      {!canGoLive && !isStreaming && (
-        <span className="text-xs text-gray-500 self-center">Enable ≥1 destination</span>
-      )}
-      <button onClick={handleRecord}
-        className={`flex-1 px-4 py-2 rounded text-sm font-semibold transition ${isRecording ? 'bg-red-700 hover:bg-red-800 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
-        {isRecording ? '■ Stop Recording' : '● Start Recording'}
       </button>
     </div>
   );
 
   const renderStreamStatus = () => {
-    if (!isStreaming || !streamSession) return null;
+    if (!streamSession) return null;
     if (streamSession.error) {
       return <div className="mt-2 text-xs text-red-400">Stream error: {streamSession.error}</div>;
     }
+    if (!isStreaming) return null;
     return (
-      <div className="mt-2 text-xs text-gray-400">
-        Live input: {streamSession.liveInputUid?.substring(0, 12)}... | Started: {new Date(streamSession.startedAt || '').toLocaleTimeString()}
+      <div className="mt-2 text-xs text-gray-400 flex flex-col space-y-1">
+        <span>Live input: {streamSession.liveInputUid?.substring(0, 12)}... | Started: {new Date(streamSession.startedAt || '').toLocaleTimeString()}</span>
+        {whipError && <span className="text-red-400">WHIP: {whipError}</span>}
+        {!whipError && streamSession.whipUrl && <span className="text-green-400">WebRTC connected</span>}
+        {!streamSession.whipUrl && <span className="text-yellow-400">No WHIP URL — using RTMP</span>}
       </div>
     );
   };
 
   return (
     <div className={`bg-gray-800 rounded-lg p-4 border-l-4 ${config.accent}`}>
+      {streamSession?.whipUrl && (
+        <StreamCompositor whipUrl={streamSession.whipUrl} whipToken={streamSession.whipToken} onError={setWhipError} />
+      )}
       <div className="flex items-center justify-between mb-3">
         <span className="text-xs text-gray-500">{config.label}</span>
       </div>

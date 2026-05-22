@@ -34,7 +34,10 @@ export async function createLiveInput(
       body: JSON.stringify({
         name,
         profile,
-        // We can add more settings here
+        mode: 'automatic',
+        lowLatency: true,
+        recording: { mode: 'off' },
+        webRTC: { enabled: true },
       }),
     }
   );
@@ -92,6 +95,35 @@ export async function getLiveInput(env: Env, uid: string): Promise<LiveInput> {
   }
 
   return data.result;
+}
+
+/**
+ * Enable or disable recording on a live input
+ */
+export async function updateLiveInputRecording(
+  env: Env,
+  liveInputUid: string,
+  enabled: boolean
+): Promise<void> {
+  const response = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/stream/live_inputs/${liveInputUid}`,
+    {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${env.CLOUDFLARE_API_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        recording: { mode: enabled ? 'automatic' : 'off' },
+      }),
+    }
+  );
+
+  const data: CloudflareStreamResponse = await response.json();
+
+  if (!data.success) {
+    throw new Error(`Failed to update recording: ${data.errors.map(e => e.message).join(', ')}`);
+  }
 }
 
 /**

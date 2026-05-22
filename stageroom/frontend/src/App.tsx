@@ -48,21 +48,24 @@ function AppContent() {
   const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
-    checkAuth().then(async () => {
-      const currentUser = useAuthStore.getState().user;
-      if (currentUser) {
-        const data = await studioApi.loadStudioConfig();
-        if (data && (data.scenes?.length || data.sources?.length)) {
-          useStreamStore.getState().loadFromDb(data);
-        } else {
-          const defaultSceneId = `scene_${Date.now()}`;
-          await useStreamStore.getState().addScene('Scene 1', defaultSceneId);
-          useStreamStore.setState({ selectedSceneId: defaultSceneId });
-        }
-      }
-      setInitialized(true);
-    });
+    checkAuth().finally(() => setInitialized(true));
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const loadData = async () => {
+      const data = await studioApi.loadStudioConfig();
+      if (data && (data.scenes?.length || data.sources?.length)) {
+        useStreamStore.getState().loadFromDb(data);
+        useStreamStore.getState().backfillRtmpSources();
+      } else {
+        const defaultSceneId = `scene_${Date.now()}`;
+        await useStreamStore.getState().addScene('Scene 1', defaultSceneId);
+        useStreamStore.setState({ selectedSceneId: defaultSceneId });
+      }
+    };
+    loadData();
+  }, [user]);
 
   useEffect(() => {
     const hash = window.location.hash.slice(1);
@@ -203,6 +206,7 @@ function AppContent() {
         onSuccess={(data) => {
           setStageMode(data.event.category || stageMode);
           setShareEvent({ title: data.event.title, url: data.qr_url });
+          useStreamStore.getState().setSetupDone(true);
           setShowSetupModal(false);
         }}
       />

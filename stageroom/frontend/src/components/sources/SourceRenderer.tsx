@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState } from 'react';
+import Hls from 'hls.js';
 import { useStreamStore } from '../../hooks/useStreamStore';
 
 interface SourceRendererProps {
@@ -13,25 +14,103 @@ interface SourceRendererProps {
   style: React.CSSProperties;
   zIndex?: number;
   readOnly?: boolean;
+  isActive?: boolean;
 }
 
 export const SourceRenderer: React.FC<SourceRendererProps> = ({
-  sourceId, type, label, previewUrl, playbackUrl, style, zIndex = 1, readOnly = false,
+  sourceId, type, label, previewUrl, playbackUrl, style, zIndex = 1, readOnly = false, isActive = true,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
   const { setSourceStream, updateSource, sourceStreams } = useStreamStore();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [screenRequested, setScreenRequested] = useState(false);
   const [screenActive, setScreenActive] = useState(false);
+  const [rtmpWaiting, setRtmpWaiting] = useState(false);
+  const [mediaPlaying, setMediaPlaying] = useState(false);
+  const sources = useStreamStore(s => s.sources);
+
+  const sourceData = sources.find(s => s.id === sourceId);
 
   useEffect(() => {
-    if (readOnly) return;
-
     let stream: MediaStream | null = null;
     let cancelled = false;
 
+    if (type === 'rtmp' && playbackUrl && isActive) {
+      console.log('RTMP HLS: loading', playbackUrl);
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+      if (Hls.isSupported()) {
+        const hls = new Hls();
+        hlsRef.current = hls;
+        hls.loadSource(playbackUrl);
+        if (videoRef.current) hls.attachMedia(videoRef.current);
+        setRtmpWaiting(true);
+        const videoEl = videoRef.current;
+        const onPlaying = () => {
+          console.log('RTMP video playing');
+          setRtmpWaiting(false);
+          setError(null);
+        };
+        if (videoEl) {
+          videoEl.addEventListener('playing', onPlaying);
+          videoEl.addEventListener('waiting', () => {
+            if (!rtmpWaiting) setRtmpWaiting(true);
+          });
+        }
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          console.log('HLS manifest parsed');
+          videoRef.current?.play().catch(() => {});
+        });
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          console.log('HLS error:', data.type, data.details, data.fatal, data.response?.code);
+          if (data.fatal) {
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR && data.response?.code === 404) {
+              setTimeout(() => hls.startLoad(), 3000);
+            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+              hls.recoverMediaError();
+            } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              hls.startLoad();
+            } else {
+              setError('HLS playback error');
+            }
+          }
+        });
+        cancelled = false;
+      } else if (videoRef.current?.canPlayType('application/vnd.apple.mpegurl')) {
+        videoRef.current.src = playbackUrl;
+      }
+    }
+
+    if (type === 'media' && previewUrl && videoRef.current && isActive) {
+      videoRef.current.src = previewUrl;
+      videoRef.current.load();
+    }
+
+    if (readOnly) return;
+
+    if (!isActive) {
+      const existing = sourceStreams.get(sourceId);
+      if (existing) {
+        existing.getTracks().forEach(t => t.stop());
+        setSourceStream(sourceId, null);
+      }
+      return;
+    }
+
     const startSource = async () => {
+      const existing = sourceStreams.get(sourceId);
+      if (existing && !existing.getTracks().every(t => t.readyState === 'ended')) {
+        if (videoRef.current) {
+          videoRef.current.srcObject = existing;
+          videoRef.current.play().catch(() => {});
+        }
+        return;
+      }
+
       if (type === 'camera') {
         try {
           setLoading(true);
@@ -89,38 +168,23 @@ export const SourceRenderer: React.FC<SourceRendererProps> = ({
         }
       }
 
-      if (type === 'rtmp' && playbackUrl) {
-        if (videoRef.current) {
-          videoRef.current.src = playbackUrl;
-          videoRef.current.load();
-          videoRef.current.play().catch(() => {});
-        }
-      }
-
-      if (type === 'media' && previewUrl) {
-        if (videoRef.current) {
-          videoRef.current.src = previewUrl;
-          videoRef.current.load();
-          videoRef.current.play().catch(() => {});
-        }
-      }
     };
 
     startSource();
 
     return () => {
       cancelled = true;
-      if (stream && (type === 'camera' || type === 'screen')) {
-        stream.getTracks().forEach(track => track.stop());
-        setSourceStream(sourceId, null);
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
       }
     };
-  }, [sourceId, type, previewUrl, setSourceStream, updateSource, screenActive, readOnly]);
+  }, [sourceId, type, previewUrl, playbackUrl, setSourceStream, updateSource, screenActive, readOnly, isActive]);
 
   const existingStream = sourceStreams.get(sourceId);
 
   useEffect(() => {
-    if (existingStream && videoRef.current && type !== 'rtmp' && type !== 'media') {
+    if (existingStream && videoRef.current && type !== 'rtmp' && type !== 'media' && type !== 'image-overlay' && type !== 'animated-overlay') {
       videoRef.current.srcObject = existingStream;
       videoRef.current.play().catch(() => {});
     }
@@ -141,7 +205,7 @@ export const SourceRenderer: React.FC<SourceRendererProps> = ({
   };
 
   return (
-    <div className="absolute bg-gray-900 overflow-hidden" style={{ ...style, zIndex }}>
+    <div data-source-id={sourceId} data-source-type="video" className="absolute bg-gray-900 overflow-hidden" style={{ ...style, zIndex }}>
       {type === 'screen' && !screenActive && !existingStream && !readOnly && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900 z-20">
           <span className="text-3xl mb-2">🖥️</span>
@@ -163,6 +227,14 @@ export const SourceRenderer: React.FC<SourceRendererProps> = ({
       {loading && type === 'screen' && !screenRequested && (
         <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80 z-10">
           <div className="text-white text-sm">Starting screen share...</div>
+        </div>
+      )}
+      {type === 'rtmp' && rtmpWaiting && !readOnly && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900 z-20">
+          <span className="text-3xl mb-2">📡</span>
+          <p className="text-gray-400 text-xs text-center px-4 mb-1">{label}</p>
+          <p className="text-gray-500 text-xs">Waiting for incoming stream...</p>
+          <p className="text-gray-600 text-[10px] mt-1">Send RTMP to the URL and key shown during creation</p>
         </div>
       )}
       {loading && type !== 'screen' && (
@@ -196,13 +268,45 @@ export const SourceRenderer: React.FC<SourceRendererProps> = ({
           </button>
         </div>
       )}
-      <video
-        ref={videoRef}
-        autoPlay
-        muted
-        playsInline
-        className="w-full h-full object-cover"
-      />
+      {type === 'media' && !mediaPlaying && previewUrl && isActive && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-20">
+          <button onClick={() => {
+            videoRef.current?.play().then(() => setMediaPlaying(true)).catch(() => {});
+          }}
+            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-lg">
+            ▶ Play
+          </button>
+        </div>
+      )}
+      {type === 'media' && mediaPlaying && (
+        <div className="absolute top-2 right-2 z-30">
+          <button onClick={() => {
+            videoRef.current?.pause();
+            setMediaPlaying(false);
+          }}
+            className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs">
+            ■ Stop
+          </button>
+        </div>
+      )}
+      {type === 'image-overlay' && sourceData?.imageUrl ? (
+        <img src={sourceData.imageUrl} alt={label}
+          className="w-full h-full object-contain"
+          style={{ opacity: sourceData.imageOpacity ?? 1 }} />
+      ) : type === 'animated-overlay' && sourceData?.animationUrl ? (
+        <video src={sourceData.animationUrl} autoPlay loop muted playsInline
+          className="w-full h-full object-contain"
+          style={{ opacity: sourceData.animationOpacity ?? 1 }} />
+      ) : (
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          crossOrigin="anonymous"
+          className="w-full h-full object-cover"
+        />
+      )}
       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-2 py-1">
         <span className="text-xs text-white truncate block">{label}</span>
       </div>

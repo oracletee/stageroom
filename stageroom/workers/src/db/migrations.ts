@@ -169,6 +169,9 @@ CREATE TABLE IF NOT EXISTS user_studio_config (
   selected_scene_id TEXT,
   program_scene_id TEXT,
   stage_mode TEXT DEFAULT 'ted-talk',
+  backstage_participants TEXT DEFAULT '[]',
+  spotlight_participants TEXT DEFAULT '[]',
+  setup_done INTEGER DEFAULT 0,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -240,6 +243,24 @@ export async function runMigrations(db: D1Database): Promise<boolean> {
     const hasEventIdCol = (hasEventId as any[])?.some((col: any) => col.name === 'event_id');
     if (!hasEventIdCol) {
       await db.prepare("ALTER TABLE scheduled_streams ADD COLUMN event_id TEXT REFERENCES events(id)").run();
+    }
+
+    const { results: hasBackstage } = await db.prepare("PRAGMA table_info(user_studio_config)").all();
+    const hasBackstageCol = (hasBackstage as any[])?.some((col: any) => col.name === 'backstage_participants');
+    if (!hasBackstageCol) {
+      await db.prepare("ALTER TABLE user_studio_config ADD COLUMN backstage_participants TEXT DEFAULT '[]'").run();
+    }
+
+    const { results: hasSpotlight } = await db.prepare("PRAGMA table_info(user_studio_config)").all();
+    const hasSpotlightCol = (hasSpotlight as any[])?.some((col: any) => col.name === 'spotlight_participants');
+    if (!hasSpotlightCol) {
+      await db.prepare("ALTER TABLE user_studio_config ADD COLUMN spotlight_participants TEXT DEFAULT '[]'").run();
+    }
+
+    const { results: hasSetupDone } = await db.prepare("PRAGMA table_info(user_studio_config)").all();
+    const hasSetupDoneCol = (hasSetupDone as any[])?.some((col: any) => col.name === 'setup_done');
+    if (!hasSetupDoneCol) {
+      await db.prepare("ALTER TABLE user_studio_config ADD COLUMN setup_done INTEGER DEFAULT 0").run();
     }
 
     return true;

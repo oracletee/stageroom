@@ -12,7 +12,8 @@ import { signUp, signIn, authenticateRequest } from './auth/local';
 import { generateLiveKitToken } from './livekit/token';
 import { initializePaystackPayment, verifyPaystackPayment } from './payments/paystack';
 import { uploadPoster } from './storage/poster';
-import { createLiveInput, listLiveInputs, getLiveInput, deleteLiveInput } from './stream/index';
+import { uploadSourceMedia, getSourceMedia } from './storage/sourceMedia';
+import { createLiveInput, listLiveInputs, getLiveInput, deleteLiveInput, updateLiveInputRecording } from './stream/index';
 import { YouTubeService } from './platforms/youtube/index';
 import { TwitchService } from './platforms/twitch/index';
 import { FacebookService } from './platforms/facebook/index';
@@ -40,6 +41,26 @@ export default {
       if (path === '/api/migrations/run' && request.method === 'POST') {
         const success = await runMigrations(env.DB);
         return jsonResponse({ success }, 200, corsHeaders);
+      }
+
+      if (path === '/api/cleanup/source-duplicates' && request.method === 'POST') {
+        const { results: dups } = await env.DB.prepare(
+          `SELECT id FROM sources GROUP BY id HAVING COUNT(*) > 1`
+        ).all();
+        let deleted = 0;
+        for (const row of dups || []) {
+          const { results: rows } = await env.DB.prepare(
+            `SELECT rowid FROM sources WHERE id = ? ORDER BY created_at ASC`
+          ).bind(row.id).all();
+          const keep = (rows || [])[0]?.rowid;
+          if (keep) {
+            const info = await env.DB.prepare(
+              `DELETE FROM sources WHERE id = ? AND rowid != ?`
+            ).bind(row.id, keep).run();
+            deleted += info.meta.changes;
+          }
+        }
+        return jsonResponse({ deleted, duplicatesFound: (dups || []).length }, 200, corsHeaders);
       }
 
       if (path.startsWith('/api/auth')) {
@@ -74,7 +95,7 @@ export default {
         return handleSettings(request, env, corsHeaders);
       }
 
-      if (path.startsWith('/api/stream/live-input')) {
+      if (path.startsWith('/api/stream/whip-proxy') || path.startsWith('/api/stream/live-input')) {
         return handleStreamEndpoints(request, env, corsHeaders);
       }
 
@@ -116,6 +137,14 @@ export default {
 
       if (path.startsWith('/api/stream/sessions')) {
         return handleStreamSessionEndpoints(request, env, corsHeaders);
+      }
+
+      if (path.startsWith('/api/upload')) {
+        return handleUploadEndpoints(request, env, corsHeaders);
+      }
+
+      if (path.startsWith('/api/media')) {
+        return handleUploadEndpoints(request, env, corsHeaders);
       }
 
       if (path.startsWith('/api/stream/schedule')) {
@@ -248,7 +277,8 @@ async function handleEvents(request: Request, env: Env, corsHeaders: Record<stri
     return jsonResponse({ events: eventsWithTickets }, 200, corsHeaders);
   }
 
-  const eventId = path.split('/').pop();
+  const parts = path.split('/');
+  const eventId = parts[3];
 
   if (path.match(/^\/api\/events\/[^\/]+$/) && request.method === 'GET') {
     const event = await getEvent(env.DB, eventId!);
@@ -624,10 +654,67 @@ async function handleStreamEndpoints(request: Request, env: Env, corsHeaders: Re
   const url = new URL(request.url);
   const path = url.pathname;
 
-  if (path === '/api/stream/live-input' && request.method === 'POST') {
-    const liveInput = await createLiveInput(env);
-    return jsonResponse(liveInput, 201, corsHeaders);
+  if (path === '/api/stream/whip-proxy' && request.method === 'POST') {
+    const { whipUrl, sdp, whipToken } = await request.json();
+    if (!whipUrl || !sdp) return jsonResponse({ error: 'Missing whipUrl or sdp' }, 400, corsHeaders);
+
+    const whipHeaders: Record<string, string> = { 'Content-Type': 'application/sdp' };
+    if (whipToken) whipHeaders['Authorization'] = `Bearer ${whipToken}`;
+
+    try {
+      const whipRes = await fetch(whipUrl, {
+        method: 'POST',
+        headers: whipHeaders,
+        body: sdp,
+      });
+      const answerSdp = await whipRes.text();
+      const sessionUrl = whipRes.headers.get('location') || whipRes.headers.get('Location') || '';
+      return jsonResponse({
+        status: whipRes.status,
+        statusText: whipRes.statusText,
+        answerSdp,
+        sessionUrl,
+      }, whipRes.ok ? 200 : 502, corsHeaders);
+    } catch (err: any) {
+      return jsonResponse({ error: err.message }, 502, corsHeaders);
+    }
   }
+
+  if (path === '/api/stream/whip-proxy/trickle' && request.method === 'POST') {
+    const { sessionUrl, sdpFragment, whipToken } = await request.json();
+    if (!sessionUrl || !sdpFragment) return jsonResponse({ error: 'Missing sessionUrl or sdpFragment' }, 400, corsHeaders);
+
+    const patchHeaders: Record<string, string> = { 'Content-Type': 'application/trickle-ice-sdpfrag' };
+    if (whipToken) patchHeaders['Authorization'] = `Bearer ${whipToken}`;
+
+    try {
+      const patchRes = await fetch(sessionUrl, {
+        method: 'PATCH',
+        headers: patchHeaders,
+        body: sdpFragment,
+      });
+      return jsonResponse({ status: patchRes.status, statusText: patchRes.statusText }, 200, corsHeaders);
+    } catch (err: any) {
+      return jsonResponse({ error: err.message }, 502, corsHeaders);
+    }
+  }
+
+  if (path.match(/^\/api\/stream\/live-input\/[^\/]+\/recording$/) && request.method === 'PUT') {
+    const parts = path.split('/');
+    const uid = parts[4];
+    if (!uid) return jsonResponse({ error: 'Missing UID' }, 400, corsHeaders);
+    const body = await request.json();
+    if (body.enabled === undefined) return jsonResponse({ error: 'Missing enabled' }, 400, corsHeaders);
+    await updateLiveInputRecording(env, uid, body.enabled);
+    return jsonResponse({ success: true }, 200, corsHeaders);
+  }
+
+   if (path === '/api/stream/live-input' && request.method === 'POST') {
+     console.log('[StreamHandler] Creating live input...');
+     const liveInput = await createLiveInput(env);
+     console.log('[StreamHandler] Live input created:', liveInput);
+     return jsonResponse(liveInput, 201, corsHeaders);
+   }
 
   if (path === '/api/stream/live-inputs' && request.method === 'GET') {
     const liveInputs = await listLiveInputs(env);
@@ -641,6 +728,11 @@ async function handleStreamEndpoints(request: Request, env: Env, corsHeaders: Re
     if (request.method === 'GET') {
       const liveInput = await getLiveInput(env, uid);
       return jsonResponse(liveInput, 200, corsHeaders);
+    }
+
+    if (request.method === 'PUT') {
+      const body = await request.json();
+      return jsonResponse({ success: true }, 200, corsHeaders);
     }
 
     if (request.method === 'DELETE') {
@@ -821,7 +913,7 @@ async function handleSourceEndpoints(request: Request, env: Env, corsHeaders: Re
 
   if (path === '/api/sources' && request.method === 'POST') {
     const body = await request.json();
-    const id = crypto.randomUUID();
+    const id = body.id || crypto.randomUUID();
     await env.DB.prepare(
       'INSERT INTO sources (id, user_id, scene_id, type, label, config, live_input_uid, playback_url, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     ).bind(id, user.id, body.sceneId || null, body.type, body.label, JSON.stringify(body.config || {}), body.liveInputUid || null, body.playbackUrl || null, body.isActive !== false ? 1 : 0).run();
@@ -847,6 +939,14 @@ async function handleSourceEndpoints(request: Request, env: Env, corsHeaders: Re
 
   if (path.match(/^\/api\/sources\/[^\/]+$/) && request.method === 'DELETE') {
     const sourceId = path.split('/').pop();
+    const { results } = await env.DB.prepare('SELECT live_input_uid FROM sources WHERE id = ? AND user_id = ?').bind(sourceId, user.id).all();
+    if (results?.[0]?.live_input_uid) {
+      try {
+        await deleteLiveInput(env, results[0].live_input_uid as string);
+      } catch (e) {
+        // Live input may already be deleted
+      }
+    }
     await env.DB.prepare('DELETE FROM sources WHERE id = ? AND user_id = ?').bind(sourceId, user.id).run();
     return jsonResponse({ success: true }, 200, corsHeaders);
   }
@@ -936,8 +1036,17 @@ async function handleStudioConfigEndpoints(request: Request, env: Env, corsHeade
     const body = await request.json();
     const id = crypto.randomUUID();
     await env.DB.prepare(
-      'INSERT OR REPLACE INTO user_studio_config (id, user_id, selected_scene_id, program_scene_id, stage_mode, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
-    ).bind(id, user.id, body.selectedSceneId || null, body.programSceneId || null, body.stageMode || 'ted-talk', new Date().toISOString()).run();
+      'INSERT OR REPLACE INTO user_studio_config (id, user_id, selected_scene_id, program_scene_id, stage_mode, backstage_participants, spotlight_participants, setup_done, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).bind(
+      id, user.id,
+      body.selectedSceneId || null,
+      body.programSceneId || null,
+      body.stageMode || 'ted-talk',
+      body.backstageParticipants || '[]',
+      body.spotlightParticipants || '[]',
+      body.setupDone ? 1 : 0,
+      new Date().toISOString()
+    ).run();
     return jsonResponse({ success: true }, 200, corsHeaders);
   }
 
@@ -1017,6 +1126,34 @@ async function handleStreamSessionEndpoints(request: Request, env: Env, corsHead
       'UPDATE stream_sessions SET status = ?, ended_at = ? WHERE id = ? AND user_id = ?'
     ).bind('ended', new Date().toISOString(), sessionId, user.id).run();
     return jsonResponse({ success: true }, 200, corsHeaders);
+  }
+
+  return jsonResponse({ error: 'Not found' }, 404, corsHeaders);
+}
+
+async function handleUploadEndpoints(request: Request, env: Env, corsHeaders: Record<string, string>): Promise<Response> {
+  const url = new URL(request.url);
+  const path = url.pathname;
+
+  if (path === '/api/upload' && request.method === 'POST') {
+    const contentType = request.headers.get('Content-Type') || 'application/octet-stream';
+    const body = await request.arrayBuffer();
+    if (!body || body.byteLength === 0) {
+      return jsonResponse({ error: 'Empty file' }, 400, corsHeaders);
+    }
+    const key = await uploadSourceMedia(env, body, contentType);
+    const mediaUrl = `${url.origin}/api/media/${key}`;
+    return jsonResponse({ url: mediaUrl }, 201, corsHeaders);
+  }
+
+  if (path.startsWith('/api/media/') && request.method === 'GET') {
+    const key = path.slice('/api/media/'.length);
+    if (!key) return jsonResponse({ error: 'Missing key' }, 400, corsHeaders);
+    const media = await getSourceMedia(env, key);
+    if (!media) return jsonResponse({ error: 'Not found' }, 404, corsHeaders);
+    return new Response(media.body, {
+      headers: { 'Content-Type': media.contentType, ...corsHeaders },
+    });
   }
 
   return jsonResponse({ error: 'Not found' }, 404, corsHeaders);

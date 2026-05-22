@@ -33,6 +33,9 @@ export async function saveStudioConfig(config: {
   programSceneId?: string | null;
   programSnapshot?: { sceneId: string; timestamp: number; sources: any[] } | null;
   stageMode?: string;
+  backstageParticipants?: string;
+  spotlightParticipants?: string;
+  setupDone?: boolean;
 }) {
   try {
     await fetch('/api/studio/config', {
@@ -83,6 +86,7 @@ export async function deleteScene(sceneId: string) {
 }
 
 export async function createSource(source: {
+  id?: string;
   type: string;
   label: string;
   sceneId?: string;
@@ -125,11 +129,15 @@ export async function updateSource(sourceId: string, updates: {
 
 export async function deleteSource(sourceId: string) {
   try {
-    await fetch(`/api/sources/${sourceId}`, {
+    const res = await fetch(`/api/sources/${sourceId}`, {
       method: 'DELETE',
       headers: { ...getAuthHeader() },
     });
-  } catch {
-    // Silently fail
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error('deleteSource failed:', res.status, err);
+    }
+  } catch (e) {
+    console.error('deleteSource error:', e);
   }
 }

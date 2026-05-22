@@ -1,6 +1,16 @@
-import { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react';
-import { Room, RemoteParticipant } from 'livekit-client';
+import { createContext, useContext, useEffect, useState, useRef, ReactNode, useCallback } from 'react';
+import { Room, RemoteParticipant, DataPacket_Kind } from 'livekit-client';
 import { useStreamStore } from '../../hooks/useStreamStore';
+import { useAuthStore } from '../../hooks/useAuthStore';
+
+interface ChatMessage {
+  id: string;
+  username: string;
+  message: string;
+  timestamp: string;
+  isHost: boolean;
+  identity: string;
+}
 
 interface LiveKitContextType {
   room: Room | null;
@@ -8,6 +18,8 @@ interface LiveKitContextType {
   connectionState: string;
   localStream: MediaStream | null;
   participantStreams: Map<string, MediaStream>;
+  chatMessages: ChatMessage[];
+  sendChatMessage: (message: string) => void;
 }
 
 const LiveKitContext = createContext<LiveKitContextType>({
@@ -16,18 +28,46 @@ const LiveKitContext = createContext<LiveKitContextType>({
   connectionState: 'disconnected',
   localStream: null,
   participantStreams: new Map(),
+  chatMessages: [],
+  sendChatMessage: () => {},
 });
 
 export const useLiveKit = () => useContext(LiveKitContext);
 
 export const LiveKitProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { setLiveKitParticipants } = useStreamStore();
+  const { user } = useAuthStore();
   const [room, setRoom] = useState<Room | null>(null);
   const [connected, setConnected] = useState(false);
   const [connectionState, setConnectionState] = useState('disconnected');
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [participantStreams, setParticipantStreams] = useState<Map<string, MediaStream>>(new Map());
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const roomRef = useRef<Room | null>(null);
+  const messageIndexRef = useRef(0);
+
+  const sendChatMessage = useCallback((message: string) => {
+    if (!roomRef.current || !connected) return;
+    const payload = JSON.stringify({
+      username: user?.name || user?.email || 'Host',
+      message,
+      isHost: true,
+      timestamp: new Date().toISOString(),
+    });
+    roomRef.current.localParticipant.publishData(
+      new TextEncoder().encode(payload),
+      DataPacket_Kind.RELIABLE,
+    );
+    const localMsg: ChatMessage = {
+      id: `local-${messageIndexRef.current++}`,
+      username: user?.name || user?.email || 'Host',
+      message,
+      timestamp: new Date().toISOString(),
+      isHost: true,
+      identity: roomRef.current.localParticipant.identity,
+    };
+    setChatMessages(prev => [...prev.slice(-199), localMsg]);
+  }, [connected, user]);
 
   useEffect(() => {
     const url = import.meta.env.VITE_LIVEKIT_URL;
@@ -87,10 +127,43 @@ export const LiveKitProvider: React.FC<{ children: ReactNode }> = ({ children })
         });
       });
 
+      roomInstance.on('dataReceived', (payload, participant) => {
+        try {
+          const text = new TextDecoder().decode(payload);
+          const data = JSON.parse(text);
+          const chatMsg: ChatMessage = {
+            id: `remote-${messageIndexRef.current++}`,
+            username: data.username || participant?.identity || 'Viewer',
+            message: data.message || '',
+            timestamp: data.timestamp || new Date().toISOString(),
+            isHost: data.isHost === true,
+            identity: participant?.identity || '',
+          };
+          setChatMessages(prev => [...prev.slice(-199), chatMsg]);
+        } catch {
+          // Ignore malformed messages
+        }
+      });
+
       try {
         await roomInstance.connect(url, token);
         setRoom(roomInstance);
         roomRef.current = roomInstance;
+
+        const connectedIdentities = new Set<string>();
+        roomInstance.remoteParticipants.forEach(p => connectedIdentities.add(p.identity));
+
+        const store = useStreamStore.getState();
+        const filteredBackstage = store.backstageParticipants.filter(id => connectedIdentities.has(id));
+        const filteredSpotlight = store.spotlightParticipants.filter(id => connectedIdentities.has(id));
+
+        if (filteredBackstage.length !== store.backstageParticipants.length ||
+            filteredSpotlight.length !== store.spotlightParticipants.length) {
+          useStreamStore.setState({
+            backstageParticipants: filteredBackstage,
+            spotlightParticipants: filteredSpotlight,
+          });
+        }
 
         const localCam = await roomInstance.localParticipant.setCameraEnabled(true);
         if (localCam) {
@@ -127,7 +200,7 @@ export const LiveKitProvider: React.FC<{ children: ReactNode }> = ({ children })
   }, [room, participantStreams, setLiveKitParticipants]);
 
   return (
-    <LiveKitContext.Provider value={{ room, connected, connectionState, localStream, participantStreams }}>
+    <LiveKitContext.Provider value={{ room, connected, connectionState, localStream, participantStreams, chatMessages, sendChatMessage }}>
       {children}
     </LiveKitContext.Provider>
   );

@@ -24,7 +24,46 @@ database_id = "5529733f-daaa-4711-a445-8f6897934ad9"
 binding = "R2"
 bucket_name = "streamers"
 
-[env.production]
+[env.production.vars]
 LIVEKIT_URL = "wss://yonumbr-live-streamers-gr2u0h9p.livekit.cloud"
+LIVEKIT_API_KEY = "YOUR_LIVEKIT_API_KEY"
+LIVEKIT_API_SECRET = "YOUR_LIVEKIT_API_SECRET"
+JWT_SECRET = "YOUR_JWT_SECRET"
+PAYSTACK_SECRET_KEY = "YOUR_PAYSTACK_SECRET_KEY"
+PAYSTACK_PUBLIC_KEY = "YOUR_PAYSTACK_PUBLIC_KEY"
+R2_BUCKET_NAME = "YOUR_R2_BUCKET_NAME"
+R2_PUBLIC_URL = "YOUR_R2_PUBLIC_URL"
+CLOUDFLARE_ACCOUNT_ID = "YOUR_CLOUDFLARE_ACCOUNT_ID"
+CLOUDFLARE_API_TOKEN = "YOUR_CLOUDFLARE_API_TOKEN"
+STREAM_PLAYBACK_DOMAIN = "YOUR_STREAM_PLAYBACK_DOMAIN"
 
-[env.staging]
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "stageroomdb"
+database_id = "5529733f-daaa-4711-a445-8f6897934ad9"
+
+[[env.production.r2_buckets]]
+binding = "R2"
+bucket_name = "streamers"
+
+[env.staging.vars]
+LIVEKIT_URL = "wss://your-livekit-instance.livekit.cloud"
+LIVEKIT_API_KEY = "YOUR_LIVEKIT_API_KEY"
+LIVEKIT_API_SECRET = "YOUR_LIVEKIT_API_SECRET"
+JWT_SECRET = "YOUR_JWT_SECRET"
+PAYSTACK_SECRET_KEY = "YOUR_PAYSTACK_SECRET_KEY"
+PAYSTACK_PUBLIC_KEY = "YOUR_PAYSTACK_PUBLIC_KEY"
+R2_BUCKET_NAME = "YOUR_R2_BUCKET_NAME"
+R2_PUBLIC_URL = "YOUR_R2_PUBLIC_URL"
+CLOUDFLARE_ACCOUNT_ID = "YOUR_CLOUDFLARE_ACCOUNT_ID"
+CLOUDFLARE_API_TOKEN = "YOUR_CLOUDFLARE_API_TOKEN"
+STREAM_PLAYBACK_DOMAIN = "YOUR_STREAM_PLAYBACK_DOMAIN"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "stageroomdb"
+database_id = "5529733f-daaa-4711-a445-8f6897934ad9"
+
+[[env.staging.r2_buckets]]
+binding = "R2"
+bucket_name = "streamers"

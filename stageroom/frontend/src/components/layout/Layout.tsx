@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useStreamStore } from '../../hooks/useStreamStore';
+import { useAuthStore } from '../../hooks/useAuthStore';
 import { StageModeSelector } from '../audience/StageModeSelector';
 import { StudioStats } from '../analytics/StudioStats';
 import { LyricEditor } from '../stage/LyricEditor';
@@ -68,6 +69,10 @@ const Layout: React.FC<LayoutProps> = ({ children, onSetup }) => {
             <span className="text-xs text-gray-400 bg-gray-700 px-2 py-1 rounded">
               {modeLabels[stageMode]} mode
             </span>
+            <button onClick={() => useAuthStore.getState().logout()}
+              className="px-3 py-1.5 rounded text-xs font-medium bg-gray-700 text-gray-300 hover:bg-red-600 hover:text-white transition">
+              Sign Out
+            </button>
           </div>
         </div>
       </header>
