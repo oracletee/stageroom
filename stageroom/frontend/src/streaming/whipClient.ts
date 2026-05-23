@@ -50,17 +50,7 @@ export class WhipClient {
     });
 
     for (const track of stream.getTracks()) {
-      const init: RTCRtpTransceiverInit = { direction: 'sendonly', streams: [stream] };
-      if (track.kind === 'video') {
-        init.sendEncodings = [
-          {
-            maxBitrate: 6_000_000,
-            maxFramerate: 30,
-            scaleResolutionDownBy: 1,
-          },
-        ];
-      }
-      this.pc.addTransceiver(track, init);
+      this.pc.addTransceiver(track, { direction: 'sendonly', streams: [stream] });
     }
 
     // Prefer VP8 for CanvasCaptureMediaStreamTrack compatibility —
