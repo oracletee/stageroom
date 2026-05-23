@@ -9,7 +9,9 @@ export const WhepViewer: React.FC<WhepViewerProps> = ({ whepUrl }) => {
   const pcRef = useRef<RTCPeerConnection | null>(null);
 
   useEffect(() => {
-    const startWhep = async () => {
+    let cancelled = false;
+
+    const startWhep = async (): Promise<void> => {
       const pc = new RTCPeerConnection({
         iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }],
         bundlePolicy: 'max-bundle',
@@ -40,6 +42,18 @@ export const WhepViewer: React.FC<WhepViewerProps> = ({ whepUrl }) => {
       if (!res.ok) {
         const errText = await res.text().catch(() => '');
         console.warn('[WhepViewer] POST failed:', res.status, errText.substring(0, 200));
+
+        // 409 = broadcast not started yet, retry with backoff
+        if (res.status === 409) {
+          pc.close();
+          pcRef.current = null;
+          if (!cancelled) {
+            const delay = 2000;
+            console.log(`[WhepViewer] Retrying in ${delay}ms...`);
+            await new Promise((r) => setTimeout(r, delay));
+            if (!cancelled) return startWhep();
+          }
+        }
         return;
       }
 
@@ -48,7 +62,12 @@ export const WhepViewer: React.FC<WhepViewerProps> = ({ whepUrl }) => {
 
       const timeout = setTimeout(() => {
         if (pc.iceConnectionState !== 'connected' && pc.iceConnectionState !== 'completed') {
-          console.warn('[WhepViewer] ICE timeout');
+          pc.close();
+          pcRef.current = null;
+          console.warn('[WhepViewer] ICE timeout, retrying...');
+          if (!cancelled) {
+            setTimeout(() => startWhep(), 2000);
+          }
         }
       }, 15000);
 
@@ -63,6 +82,7 @@ export const WhepViewer: React.FC<WhepViewerProps> = ({ whepUrl }) => {
     startWhep().catch((err) => console.warn('[WhepViewer] Error:', err));
 
     return () => {
+      cancelled = true;
       pcRef.current?.close();
       pcRef.current = null;
     };
