@@ -19,18 +19,6 @@ export const AnimatedOverlay: React.FC<AnimatedOverlayProps> = () => {
     'tickertape': 'LIVE NOW: Amazing content happening right now! Don\'t miss out!'
   };
 
-  const handleApply = () => {
-    // In a real implementation, this would apply the animated overlay to the stream
-    console.log('Applying animated overlay:', {
-      animationType,
-      content,
-      duration,
-      position,
-      isVisible,
-      isAnimating
-    });
-  };
-
   const handleStartAnimation = () => {
     setIsAnimating(true);
     setIsVisible(true);

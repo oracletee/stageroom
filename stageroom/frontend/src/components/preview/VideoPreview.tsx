@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { useStreamStore, type StageMode } from '../../hooks/useStreamStore';
 import { StageComposition } from '../stage/StageComposition';
 import { useLiveKit } from '../stage/LiveKitProvider';
-import { StreamCompositor } from '../stream/StreamCompositor';
+import { useSceneGraph } from '../../hooks/useSceneGraph';
+import { ProgramCompositor } from '../../compositor/ProgramCompositor';
+import { WhepViewer } from '../../streaming/WhepViewer';
 
 const modeConfig: Record<StageMode, { accent: string; layout: 'side' | 'stacked' | 'program-dominant'; label: string }> = {
   'ted-talk': { accent: 'border-amber-500', layout: 'side', label: 'TED Talk — Speaker Focused' },
@@ -15,9 +17,32 @@ const modeConfig: Record<StageMode, { accent: string; layout: 'side' | 'stacked'
 };
 
 export const VideoPreview: React.FC = () => {
-  const { selectedSceneId, programSceneId, programSnapshot, pushToProgram, isStreaming, setStreaming, stageMode, streamSession, setStreamSession, destinations, scenes, setupDone } = useStreamStore();
+  const { selectedSceneId, programSceneId, programSnapshot, pushToProgram, isStreaming, setStreaming, stageMode, streamSession, setStreamSession, scenes, setupDone } = useStreamStore();
   const { connected, connectionState } = useLiveKit();
+  const programLayers = useSceneGraph();
   const [whipError, setWhipError] = useState<string | null>(null);
+  const streamSessionRef = useRef(streamSession);
+  streamSessionRef.current = streamSession;
+
+  const handleRecordingEnable = useCallback(async () => {
+    const liveInputUid = streamSessionRef.current?.liveInputUid;
+    if (!liveInputUid) return;
+    try {
+      const recRes = await fetch(`/api/stream/live-input/${liveInputUid}/recording`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: true }),
+      });
+      if (!recRes.ok) {
+        const recErr = await recRes.json().catch(() => ({}));
+        console.warn('[VideoPreview] Recording PUT returned', recRes.status, recErr);
+      } else {
+        console.log('[VideoPreview] Recording enabled via onConnected');
+      }
+    } catch (err) {
+      console.error('[VideoPreview] Failed to enable recording:', err);
+    }
+  }, []);
 
   const config = modeConfig[stageMode];
   const canGoLive = setupDone;
@@ -62,27 +87,12 @@ export const VideoPreview: React.FC = () => {
         try { data = await response.json(); } catch {
           throw new Error('Invalid response from server');
         }
-        console.log('[VideoPreview] Live input created:', data.uid, 'webRTC:', JSON.stringify(data.webRTC));
         const whipUrl = data.webRTC?.url;
         const whipToken = data.webRTC?.token;
+        const whepUrl = data.webRTCPlayback?.url;
+        console.log('[VideoPreview] Live input created:', data.uid, 'webRTC:', JSON.stringify(data.webRTC), 'webRTCPlayback:', JSON.stringify(data.webRTCPlayback));
 
-        try {
-          const recRes = await fetch(`/api/stream/live-input/${data.uid}/recording`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled: true }),
-          });
-          if (!recRes.ok) {
-            const recErr = await recRes.json().catch(() => ({}));
-            console.warn('[VideoPreview] Recording PUT returned', recRes.status, recErr);
-          } else {
-            console.log('[VideoPreview] Recording enabled');
-          }
-        } catch (err) {
-          console.error('[VideoPreview] Failed to start recording:', err);
-        }
-
-        setStreamSession({ liveInputUid: data.uid, whipUrl, whipToken, startedAt: new Date().toISOString() });
+        setStreamSession({ liveInputUid: data.uid, whipUrl, whipToken, whepUrl, startedAt: new Date().toISOString() });
         setStreaming(true);
       } catch (err: any) {
         console.error('Failed to start stream:', err);
@@ -140,9 +150,29 @@ export const VideoPreview: React.FC = () => {
 
   return (
     <div className={`bg-gray-800 rounded-lg p-4 border-l-4 ${config.accent}`}>
-      {streamSession?.whipUrl && (
-        <StreamCompositor whipUrl={streamSession.whipUrl} whipToken={streamSession.whipToken} onError={setWhipError} />
-      )}
+      <div className="flex space-x-2 mb-3">
+        {streamSession?.whipUrl && (
+          <div className="flex-1 min-w-0">
+            <ProgramCompositor
+              sceneLayers={programLayers}
+              whipUrl={streamSession.whipUrl}
+              whipToken={streamSession.whipToken}
+              onError={setWhipError}
+              onConnected={handleRecordingEnable}
+            />
+          </div>
+        )}
+        {streamSession?.whepUrl && (
+          <div className="flex-1 min-w-0">
+            <div className="relative bg-gray-900 rounded overflow-hidden border border-gray-700 aspect-video">
+              <WhepViewer whepUrl={streamSession.whepUrl} />
+              <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-blue-600/80 text-white text-[10px] rounded">
+                CLOUDFLARE
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
       <div className="flex items-center justify-between mb-3">
         <span className="text-xs text-gray-500">{config.label}</span>
       </div>

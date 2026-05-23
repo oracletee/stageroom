@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 interface MediaPlaybackProps {
   // In a real implementation, this would manage media playback
@@ -10,7 +10,7 @@ export const MediaPlayback: React.FC<MediaPlaybackProps> = () => {
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(80);
   const [isLoaded, setIsLoaded] = useState(false);
-  const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement>(null);
+  const mediaRef = useRef<HTMLVideoElement>(null);
 
   // Simulate media loading
   useEffect(() => {
@@ -57,8 +57,9 @@ export const MediaPlayback: React.FC<MediaPlaybackProps> = () => {
   // Update current time during playback
   useEffect(() => {
     if (isPlaying && mediaRef.current) {
+      const el = mediaRef.current;
       const interval = setInterval(() => {
-        setCurrentTime(mediaRef.current.currentTime);
+        setCurrentTime(el.currentTime);
       }, 1000);
       
       return () => clearInterval(interval);
@@ -67,7 +68,7 @@ export const MediaPlayback: React.FC<MediaPlaybackProps> = () => {
 
   return (
     <div className="bg-gray-800 rounded-lg p-4">
-      <div className="mb-4">
+      <div className="mb-1">
         <h2 className="text-lg font-semibold mb-2">Media Playback</h2>
         <p className="text-sm text-gray-400">
           Play videos, audio, or other media files in your stream

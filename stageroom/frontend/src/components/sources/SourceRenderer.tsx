@@ -22,7 +22,7 @@ export const SourceRenderer: React.FC<SourceRendererProps> = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
-  const { setSourceStream, updateSource, sourceStreams } = useStreamStore();
+  const { setSourceStream, setSourceVideoElement, updateSource, sourceStreams } = useStreamStore();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [screenRequested, setScreenRequested] = useState(false);
@@ -123,6 +123,7 @@ export const SourceRenderer: React.FC<SourceRendererProps> = ({
             if (videoRef.current) {
               videoRef.current.srcObject = stream;
               videoRef.current.play().catch(() => {});
+              setSourceVideoElement(sourceId, videoRef.current);
             }
           }
         } catch (err: any) {
@@ -146,9 +147,11 @@ export const SourceRenderer: React.FC<SourceRendererProps> = ({
             if (videoRef.current) {
               videoRef.current.srcObject = stream;
               videoRef.current.play().catch(() => {});
+              setSourceVideoElement(sourceId, videoRef.current);
             }
             stream.getVideoTracks()[0].addEventListener('ended', () => {
               setSourceStream(sourceId, null);
+              setSourceVideoElement(sourceId, null);
               setScreenActive(false);
               updateSource(sourceId, { isActive: false });
             });
@@ -174,6 +177,7 @@ export const SourceRenderer: React.FC<SourceRendererProps> = ({
 
     return () => {
       cancelled = true;
+      setSourceVideoElement(sourceId, null);
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
@@ -187,8 +191,11 @@ export const SourceRenderer: React.FC<SourceRendererProps> = ({
     if (existingStream && videoRef.current && type !== 'rtmp' && type !== 'media' && type !== 'image-overlay' && type !== 'animated-overlay') {
       videoRef.current.srcObject = existingStream;
       videoRef.current.play().catch(() => {});
+      setSourceVideoElement(sourceId, videoRef.current);
+    } else if (!existingStream) {
+      setSourceVideoElement(sourceId, null);
     }
-  }, [existingStream, type]);
+  }, [existingStream, type, setSourceVideoElement, sourceId]);
 
   const handleStartScreen = () => {
     setError(null);
@@ -200,12 +207,13 @@ export const SourceRenderer: React.FC<SourceRendererProps> = ({
       existingStream.getTracks().forEach(t => t.stop());
     }
     setSourceStream(sourceId, null);
+    setSourceVideoElement(sourceId, null);
     setScreenActive(false);
     updateSource(sourceId, { isActive: false });
   };
 
   return (
-    <div data-source-id={sourceId} data-source-type="video" className="absolute bg-gray-900 overflow-hidden" style={{ ...style, zIndex }}>
+    <div className="absolute bg-gray-900 overflow-hidden" style={{ ...style, zIndex }}>
       {type === 'screen' && !screenActive && !existingStream && !readOnly && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900 z-20">
           <span className="text-3xl mb-2">🖥️</span>

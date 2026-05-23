@@ -4,7 +4,7 @@ import * as studioApi from '../api/studio';
 export type StageMode = 'ted-talk' | 'podcast' | 'event' | 'worship' | 'classroom' | 'debate' | 'film-premiere';
 export type AppView = 'host' | 'viewer' | 'dashboard' | 'events';
 
-interface SourceItem {
+export interface SourceItem {
   id: string;
   type: 'camera' | 'screen' | 'media' | 'text' | 'image' | 'text-overlay' | 'image-overlay' | 'animated-overlay' | 'ndi' | 'rtmp' | 'lower-third' | 'stage-background';
   label: string;
@@ -77,13 +77,15 @@ interface StreamState {
   updateSourceField: (sourceId: string, field: string, value: any) => void;
   sourceStreams: Map<string, MediaStream>;
   setSourceStream: (sourceId: string, stream: MediaStream | null) => void;
+  sourceVideoElements: Map<string, HTMLVideoElement | null>;
+  setSourceVideoElement: (sourceId: string, el: HTMLVideoElement | null) => void;
   scenes: Scene[];
   selectedSceneId: string | null;
   programSceneId: string | null;
   programSnapshot: { sceneId: string; timestamp: number; sources: SourceItem[] } | null;
   isStreaming: boolean;
-  streamSession: { liveInputUid?: string; whipUrl?: string; whipToken?: string; startedAt?: string; error?: string } | null;
-  setStreamSession: (session: { liveInputUid?: string; whipUrl?: string; whipToken?: string; startedAt?: string; error?: string } | null) => void;
+  streamSession: { liveInputUid?: string; whipUrl?: string; whipToken?: string; whepUrl?: string; startedAt?: string; error?: string } | null;
+  setStreamSession: (session: { liveInputUid?: string; whipUrl?: string; whipToken?: string; whepUrl?: string; startedAt?: string; error?: string } | null) => void;
   addScene: (name: string, id?: string) => Promise<string>;
   removeScene: (sceneId: string) => void;
   renameScene: (sceneId: string, name: string) => void;
@@ -278,6 +280,13 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     else next.delete(sourceId);
     return { sourceStreams: next };
   }),
+  sourceVideoElements: new Map(),
+  setSourceVideoElement: (sourceId, el) => set((state) => {
+    const next = new Map(state.sourceVideoElements);
+    if (el) next.set(sourceId, el);
+    else next.delete(sourceId);
+    return { sourceVideoElements: next };
+  }),
   scenes: [],
   selectedSceneId: null,
   programSceneId: null,
@@ -428,11 +437,11 @@ export const useStreamStore = create<StreamState>((set, get) => ({
   },
   loadFromDb: (data) => {
     const seen = new Map<string, any>();
-    (data.sources || []).forEach(s => seen.set(s.id, s));
+    (data.sources || []).forEach((s: any) => seen.set(s.id, s));
     const sources = Array.from(seen.values()).map(parseDbSource);
     const rawScenes = (data.scenes || []).map(parseDbScene);
     const sceneMap = new Map<string, Scene>();
-    rawScenes.forEach(s => sceneMap.set(s.id, s));
+    rawScenes.forEach((s: Scene) => sceneMap.set(s.id, s));
     const scenes = Array.from(sceneMap.values());
     const config = data.config;
     const destinations = (data.destinations || []).map((d: any) => ({

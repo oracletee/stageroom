@@ -1,14 +1,11 @@
 import { useState, useEffect } from 'react';
-import { useAuthStore } from '../../hooks/useAuthStore';
-
 
 interface DonationFlowProps {
   eventId: string;
-  onSuccess?: () => void;
   onClose?: () => void;
 }
 
-export function DonationFlow({ eventId, onSuccess, onClose }: DonationFlowProps) {
+export function DonationFlow({ eventId, onClose }: DonationFlowProps) {
   const [config, setConfig] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [selectedType, setSelectedType] = useState('general');
@@ -18,7 +15,6 @@ export function DonationFlow({ eventId, onSuccess, onClose }: DonationFlowProps)
   const [name, setName] = useState('');
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState(false);
 
   useEffect(() => {
     fetchConfig();
@@ -135,14 +131,7 @@ export function DonationFlow({ eventId, onSuccess, onClose }: DonationFlowProps)
           </div>
         )}
 
-        {success ? (
-          <div className="text-center py-8">
-            <div className="text-green-600 text-4xl mb-4">✓</div>
-            <h3 className="text-lg font-semibold mb-2">Thank You!</h3>
-            <p className="text-gray-600">Your donation is being processed</p>
-          </div>
-        ) : (
-          <div className="space-y-6">
+        <div className="space-y-6">
             <div>
               <label className="block text-sm font-medium mb-2">Type</label>
               <div className="flex gap-2">
@@ -224,8 +213,7 @@ export function DonationFlow({ eventId, onSuccess, onClose }: DonationFlowProps)
               {processing ? 'Processing...' : `Give ₦${(getAmount() / 100).toLocaleString()}`}
             </button>
           </div>
-        )}
+        </div>
       </div>
-    </div>
   );
 }

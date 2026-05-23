@@ -15,10 +15,8 @@ export const ScreenShare: React.FC<ScreenShareProps> = () => {
       setShareStatus('sharing');
       // Try to get screen capture stream
       const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          cursor: 'always'
-        },
-        audio: false
+        video: true,
+        audio: false,
       });
       
       setSharedStream(stream);

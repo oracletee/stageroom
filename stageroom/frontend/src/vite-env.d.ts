@@ -10,3 +10,18 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+// Insertable Streams API — not yet in TypeScript's DOM lib
+declare class MediaStreamTrackGenerator extends MediaStreamTrack {
+  constructor(init: { kind: 'video' | 'audio' });
+  readonly writable: WritableStream<VideoFrame | AudioData>;
+}
+
+declare class VideoFrame {
+  constructor(image: HTMLCanvasElement | HTMLVideoElement | HTMLImageElement | ImageBitmap | VideoFrame, init: { timestamp: number; duration?: number; codedWidth?: number; codedHeight?: number });
+  readonly timestamp: number;
+  readonly duration: number | null;
+  readonly codedWidth: number | null;
+  readonly codedHeight: number | null;
+  close(): void;
+}

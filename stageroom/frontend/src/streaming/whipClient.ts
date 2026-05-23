@@ -1,15 +1,16 @@
 export class WhipClient {
   private pc: RTCPeerConnection | null = null;
   private sessionUrl: string | null = null;
-  private whipUrl: string | null = null;
   private _token: string | undefined;
   private stopped = false;
   private iceTimeout: ReturnType<typeof setTimeout> | null = null;
-  private iceReject: ((reason: any) => void) | null = null;
   private _trickleHandler: ((e: RTCPeerConnectionIceEvent) => void) | null = null;
   private _connHandler: (() => void) | null = null;
+  private _keepaliveInterval: ReturnType<typeof setInterval> | null = null;
+  private _statsInterval: ReturnType<typeof setInterval> | null = null;
+  private onDisconnected: (() => void) | null = null;
 
-  async start(whipUrl: string, stream: MediaStream, whipToken?: string): Promise<void> {
+  async start(whipUrl: string, stream: MediaStream, whipToken?: string, onDisconnected?: () => void): Promise<void> {
     if (this.pc) {
       console.warn('[WhipClient] Already started, ignoring duplicate call');
       return;
@@ -18,8 +19,8 @@ export class WhipClient {
     console.log('[WhipClient] Starting WHIP:', whipUrl.slice(0, 80) + '...');
     console.log('[WhipClient] Stream tracks:', stream.getTracks().map(t => `${t.kind}:${t.readyState}:${t.enabled}`));
 
-    this.whipUrl = whipUrl;
     this._token = whipToken;
+    this.onDisconnected = onDisconnected ?? null;
 
     this.pc = new RTCPeerConnection({
       iceServers: [
@@ -49,7 +50,38 @@ export class WhipClient {
     });
 
     for (const track of stream.getTracks()) {
-      this.pc.addTransceiver(track, { direction: 'sendonly', streams: [stream] });
+      const init: RTCRtpTransceiverInit = { direction: 'sendonly', streams: [stream] };
+      if (track.kind === 'video') {
+        init.sendEncodings = [
+          {
+            maxBitrate: 6_000_000,
+            maxFramerate: 30,
+            scaleResolutionDownBy: 1,
+          },
+        ];
+      }
+      this.pc.addTransceiver(track, init);
+    }
+
+    // Prefer VP8 for CanvasCaptureMediaStreamTrack compatibility —
+    // the canvas capture encoder natively produces VP8, while Chrome's
+    // default SDP order prefers H.264 (hardware). Selecting H.264
+    // can cause the encoder pipeline to produce black/empty frames.
+    const [videoTransceiver] = this.pc
+      .getTransceivers()
+      .filter((t) => t.sender?.track?.kind === 'video');
+    if (videoTransceiver && typeof RTCRtpSender.getCapabilities === 'function') {
+       const caps = RTCRtpSender.getCapabilities('video');
+       if (caps) {
+         const vp8 = caps.codecs.find((c) => c.mimeType.includes('VP8'));
+         const vp9 = caps.codecs.find((c) => c.mimeType.includes('VP9'));
+         const h264 = caps.codecs.find((c) => c.mimeType.includes('H264'));
+         const preferred = [vp8, vp9, h264].filter(Boolean) as RTCRtpCodec[];
+         if (preferred.length && videoTransceiver.setCodecPreferences) {
+           videoTransceiver.setCodecPreferences(preferred);
+           console.log('[WhipClient] Set codec preferences:', preferred.map((c) => c.mimeType));
+         }
+       }
     }
 
     const offer = await this.pc.createOffer();
@@ -120,6 +152,8 @@ export class WhipClient {
     console.log('[WhipClient] Answer SDP preview:', answerSdp.slice(0, 500));
     console.log('[WhipClient] Answer candidates:', (answerSdp.match(/a=candidate/g) || []).length);
     console.log('[WhipClient] Answer ice-lite:', answerSdp.includes('a=ice-lite'));
+    const selectedCodec = answerSdp.match(/a=rtpmap:(\d+) ([\w\/.]+)/g);
+    console.log('[WhipClient] Answer codecs:', selectedCodec);
 
     await this.pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
 
@@ -129,6 +163,21 @@ export class WhipClient {
 
     console.log('[WhipClient] Starting ICE connection wait...');
     await this.waitForIceConnected();
+
+    // Monitor for ICE disconnection after initial connect
+    const disconnectHandler = () => {
+      const state = this.pc?.iceConnectionState;
+      if (state === 'disconnected' || state === 'failed') {
+        console.log('[WhipClient] ICE lost after connect:', state);
+        this.stopKeepalive();
+        this.pc?.removeEventListener('iceconnectionstatechange', disconnectHandler);
+        // Notify user of disconnection for potential reconnection
+        if (this.onDisconnected) {
+          this.onDisconnected();
+        }
+      }
+    };
+    this.pc.addEventListener('iceconnectionstatechange', disconnectHandler);
   }
 
   private setupTrickleIce(): void {
@@ -170,11 +219,11 @@ export class WhipClient {
   private waitForIceConnected(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       if (!this.pc) return reject(new Error('Closed'));
-      this.iceReject = reject;
       const cur = this.pc.iceConnectionState;
       console.log('[WhipClient] Waiting for ICE connected, current state:', cur);
       if (cur === 'connected' || cur === 'completed') {
         console.log('[WhipClient] ICE already connected/completed');
+        this.startKeepalive();
         return resolve();
       }
       if (cur === 'failed' || cur === 'disconnected') {
@@ -200,6 +249,7 @@ export class WhipClient {
           console.log('[WhipClient] ICE connected/completed');
           this.clearIce();
           this.cleanupIceConnectionHandler();
+          this.startKeepalive();
           resolve();
         }
         if (state === 'failed' || state === 'disconnected') {
@@ -214,6 +264,61 @@ export class WhipClient {
     });
   }
 
+  private startKeepalive(): void {
+    if (!this.sessionUrl || this._keepaliveInterval) return;
+    // Cloudflare WHIP servers timeout inactive sessions.
+     // Periodic PATCH requests keep the session alive.
+     this._keepaliveInterval = setInterval(() => {
+       if (this.stopped || !this.sessionUrl) return;
+       fetch('/api/stream/whip-proxy/trickle', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({
+           sessionUrl: this.sessionUrl,
+           sdpFragment: 'a=candidate:0 1 UDP 2122252543 0.0.0.0 0 typ host\r\n',
+           whipToken: this._token,
+         }),
+       })
+         .then(response => {
+           if (!response.ok) {
+             console.warn('[WhipClient] Keepalive failed:', response.status, response.statusText);
+           }
+         })
+         .catch(err => {
+           console.warn('[WhipClient] Keepalive error:', err);
+         });
+     }, 15000);
+
+     // Periodic encoder stats for debugging
+     this._statsInterval = setInterval(() => {
+       if (this.stopped || !this.pc) return;
+       this.pc.getStats().then(stats => {
+         stats.forEach(report => {
+           if (report.type === 'outbound-rtp' && report.kind === 'video') {
+             console.log('[WhipClient] Video encoder stats:', {
+               bytesSent: report.bytesSent,
+               packetsSent: report.packetsSent,
+               framesEncoded: report.framesEncoded,
+               frameWidth: report.frameWidth,
+               frameHeight: report.frameHeight,
+               qualityLimitationReason: report.qualityLimitationReason || 'none',
+               totalEncodeTime: report.totalEncodeTime
+             });
+           }
+         });
+       }).catch(err => {
+         console.warn('[WhipClient] Failed to get stats:', err);
+       });
+     }, 30000); // Every 30 seconds
+  }
+
+  private stopKeepalive(): void {
+    if (this._keepaliveInterval) {
+      clearInterval(this._keepaliveInterval);
+      this._keepaliveInterval = null;
+    }
+  }
+
   private cleanupIceConnectionHandler(): void {
     if (this.pc && this._connHandler) {
       this.pc.removeEventListener('iceconnectionstatechange', this._connHandler);
@@ -226,12 +331,13 @@ export class WhipClient {
       clearTimeout(this.iceTimeout);
       this.iceTimeout = null;
     }
-    this.iceReject = null;
   }
 
   stop(): void {
     this.stopped = true;
     this.clearIce();
+    this.stopKeepalive();
+    this.stopStatsInterval();
     this.cleanupIceConnectionHandler();
     if (this.pc) {
       if (this._trickleHandler) {
@@ -240,6 +346,13 @@ export class WhipClient {
       }
       this.pc.close();
       this.pc = null;
+    }
+  }
+
+  private stopStatsInterval(): void {
+    if (this._statsInterval) {
+      clearInterval(this._statsInterval);
+      this._statsInterval = null;
     }
   }
 }

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, useRef, ReactNode, useCallback } from 'react';
-import { Room, RemoteParticipant, DataPacket_Kind } from 'livekit-client';
+import { Room, RemoteParticipant } from 'livekit-client';
 import { useStreamStore } from '../../hooks/useStreamStore';
 import { useAuthStore } from '../../hooks/useAuthStore';
 
@@ -56,7 +56,7 @@ export const LiveKitProvider: React.FC<{ children: ReactNode }> = ({ children })
     });
     roomRef.current.localParticipant.publishData(
       new TextEncoder().encode(payload),
-      DataPacket_Kind.RELIABLE,
+      { reliable: true } as any,
     );
     const localMsg: ChatMessage = {
       id: `local-${messageIndexRef.current++}`,
@@ -108,7 +108,7 @@ export const LiveKitProvider: React.FC<{ children: ReactNode }> = ({ children })
         });
       });
 
-      roomInstance.on('trackSubscribed', (track, publication, participant) => {
+      roomInstance.on('trackSubscribed', (track, _publication, participant) => {
         if (track.kind === 'video') {
           const stream = new MediaStream([track.mediaStreamTrack]);
           setParticipantStreams(prev => {
@@ -167,7 +167,7 @@ export const LiveKitProvider: React.FC<{ children: ReactNode }> = ({ children })
 
         const localCam = await roomInstance.localParticipant.setCameraEnabled(true);
         if (localCam) {
-          const camPub = roomInstance.localParticipant.getTrackPublication('camera');
+          const camPub = roomInstance.localParticipant.getTrackPublication('camera' as any);
           if (camPub?.track) {
             const stream = new MediaStream([camPub.track.mediaStreamTrack]);
             setLocalStream(stream);

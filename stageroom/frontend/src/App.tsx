@@ -38,7 +38,7 @@ interface EventData {
 }
 
 function AppContent() {
-  const { user, loading, checkAuth, logout } = useAuthStore();
+  const { user, loading, checkAuth } = useAuthStore();
   const { appView, setAppView, stageMode, setStageMode } = useStreamStore();
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [guestEventId, setGuestEventId] = useState<string | null>(null);

@@ -39,7 +39,7 @@ export const StudioPanel: React.FC = () => {
 const SourcesTab: React.FC = () => {
   const {
     sources, addSource, removeSource,
-    selectedSceneId, addSourceToScene, removeSourceFromScene,
+    addSourceToScene, removeSourceFromScene,
   } = useStreamStore();
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -86,8 +86,6 @@ const SourcesTab: React.FC = () => {
   };
 
   const handleAddSource = async () => {
-    let rtmpData: { uid?: string; url?: string; token?: string; playbackUrl?: string; streamKey?: string } = {};
-
     if (sourceType === 'rtmp') {
       setRtmpLoading(true);
       setRtmpError('');
@@ -120,25 +118,25 @@ const SourcesTab: React.FC = () => {
       }
     }
 
+    const st = sourceType;
     const newSource = {
-      id: `${sourceType}${Date.now()}`,
-      type: sourceType,
-      label: sourceLabel || `${sourceType.charAt(0).toUpperCase() + sourceType.slice(1)} ${Date.now()}`,
-      previewUrl: sourceType === 'media' ? mediaFileUrl : '',
+      id: `${st}${Date.now()}`,
+      type: st,
+      label: sourceLabel || `${st.charAt(0).toUpperCase() + st.slice(1)} ${Date.now()}`,
+      previewUrl: st === 'media' ? mediaFileUrl : '',
       isActive: true,
-      ...(sourceType === 'ndi' ? { ndiSourceName, ndiAddress } : {}),
-      ...(sourceType === 'rtmp' ? rtmpData : {}),
-      ...(sourceType === 'text-overlay' ? {
+      ...(st === 'ndi' ? { ndiSourceName, ndiAddress } : {}),
+      ...(st === 'text-overlay' ? {
         overlayText,
         overlayFontSize,
         overlayTextColor,
         overlayBackgroundColor,
         overlayPosition,
       } : {}),
-      ...(sourceType === 'lower-third' ? { ltName, ltTitle, ltTemplate, ltVisible } : {}),
-      ...(sourceType === 'stage-background' ? { bgColor } : {}),
-      ...(sourceType === 'image-overlay' ? { imageUrl, imageOpacity, imageScale, overlayPosition } : {}),
-      ...(sourceType === 'animated-overlay' ? { animationUrl, animationOpacity, animationScale, overlayPosition } : {}),
+      ...(st === 'lower-third' ? { ltName, ltTitle, ltTemplate, ltVisible } : {}),
+      ...(st === 'stage-background' ? { bgColor } : {}),
+      ...(st === 'image-overlay' ? { imageUrl, imageOpacity, imageScale, overlayPosition } : {}),
+      ...(st === 'animated-overlay' ? { animationUrl, animationOpacity, animationScale, overlayPosition } : {}),
     };
     addSource(newSource);
     setShowAddModal(false);
@@ -931,7 +929,7 @@ const SourcesTab: React.FC = () => {
               </button>
               {rtmpCreatedData ? (
                 <button onClick={() => {
-                  const newSource = {
+                  const newSource: Parameters<typeof addSource>[0] = {
                     id: `rtmp${Date.now()}`,
                     type: 'rtmp',
                     label: sourceLabel || `RTMP ${Date.now()}`,

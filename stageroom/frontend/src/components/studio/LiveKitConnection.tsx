@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Room, LocalParticipant, RemoteParticipant } from 'livekit-client';
-import { ConnectionState, ConnectionQuality, Participant } from '@livekit/components-react';
 import './LiveKitConnection.css';
 
 interface LiveKitConnectionProps {
   roomName: string;
   userName: string;
-  onParticipantJoined?: (participant: Participant) => void;
-  onParticipantLeft?: (participant: Participant) => void;
+  onParticipantJoined?: (participant: RemoteParticipant) => void;
+  onParticipantLeft?: (participant: RemoteParticipant) => void;
 }
 
 export const LiveKitConnection: React.FC<LiveKitConnectionProps> = ({
@@ -17,10 +16,10 @@ export const LiveKitConnection: React.FC<LiveKitConnectionProps> = ({
   onParticipantLeft,
 }) => {
   const [room, setRoom] = useState<Room | null>(null);
-  const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
+  const [connectionState, setConnectionState] = useState<string>('disconnected');
   const [localParticipant, setLocalParticipant] = useState<LocalParticipant | null>(null);
   const [remoteParticipants, setRemoteParticipants] = useState<RemoteParticipant[]>([]);
-  const [connectionQuality, setConnectionQuality] = useState<ConnectionQuality | null>(null);
+  const [connectionQuality, setConnectionQuality] = useState<string | null>(null);
 
   useEffect(() => {
     const initLiveKit = async () => {
@@ -40,8 +39,8 @@ export const LiveKitConnection: React.FC<LiveKitConnectionProps> = ({
         setConnectionState(state);
       });
 
-      roomInstance.on('connectionQualityChanged', (quality) => {
-        setConnectionQuality(quality);
+      roomInstance.on('connectionQualityChanged', (quality: any) => {
+        setConnectionQuality(String(quality));
       });
 
       roomInstance.on('participantConnected', (participant) => {
@@ -54,16 +53,10 @@ export const LiveKitConnection: React.FC<LiveKitConnectionProps> = ({
         onParticipantLeft?.(participant);
       });
 
-      roomInstance.on('localParticipant', (participant) => {
-        setLocalParticipant(participant);
-      });
-
       try {
-        await roomInstance.connect(url, token, {
-          name: userName,
-          metadata: JSON.stringify({ role: 'host' }),
-        });
+        await roomInstance.connect(url, token);
 
+        setLocalParticipant(roomInstance.localParticipant);
         setRoom(roomInstance);
       } catch (error) {
         console.error('Failed to connect to LiveKit room:', error);

@@ -1,12 +1,6 @@
-import { useState, useEffect } from 'react';
 
-interface AnalyticsDashboardProps {
-  summary?: boolean;
-}
 
-export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ summary }) => {
-  const [isLoading, setIsLoading] = useState(false);
-
+export const AnalyticsDashboard: React.FC = () => {
   return (
     <div className="bg-gray-800 rounded-lg p-4">
       <div className="mb-4">

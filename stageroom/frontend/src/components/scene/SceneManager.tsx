@@ -90,8 +90,6 @@ export const SceneManager: React.FC<SceneManagerProps> = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [newSceneName, setNewSceneName] = useState('');
 
-  const activeScene = scenes.find(scene => scene.id === activeSceneId);
-
   const handleSceneSelect = (sceneId: string) => {
     setActiveSceneId(sceneId);
   };

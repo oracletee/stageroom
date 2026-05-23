@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { useStreamStore, type StageMode } from '../../hooks/useStreamStore';
-import { useLiveKit } from './LiveKitProvider';
+import { useStreamStore } from '../../hooks/useStreamStore';
 import { SourceRenderer } from '../sources/SourceRenderer';
 
 interface StageCompositionProps {
@@ -8,8 +7,7 @@ interface StageCompositionProps {
 }
 
 export const StageComposition: React.FC<StageCompositionProps> = ({ variant }) => {
-  const { stageMode, spotlightParticipants, lyricText, sources, scenes, selectedSceneId, programSceneId, programSnapshot, lowerThird, stageBackground, updateSourceField } = useStreamStore();
-  const { localStream, participantStreams } = useLiveKit();
+  const { sources, scenes, selectedSceneId, programSnapshot, lowerThird, stageBackground, updateSourceField } = useStreamStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState<{
     id: string;
@@ -18,8 +16,6 @@ export const StageComposition: React.FC<StageCompositionProps> = ({ variant }) =
     origOffsetX: number;
     origOffsetY: number;
   } | null>(null);
-
-  let activeSources: typeof sources;
   let videoSources: typeof sources;
   let textOverlays: typeof sources;
   let imageOverlays: typeof sources;
@@ -31,7 +27,6 @@ export const StageComposition: React.FC<StageCompositionProps> = ({ variant }) =
     const ordered = programSnapshot.sources
       .map(s => (s.isActive !== false ? s : null))
       .filter((s): s is typeof programSnapshot.sources[0] => s !== null);
-    activeSources = ordered;
     videoSources = ordered.filter(s => ['camera', 'screen', 'media', 'rtmp'].includes(s.type));
     textOverlays = ordered.filter(s => s.type === 'text-overlay');
     imageOverlays = ordered.filter(s => s.type === 'image-overlay');
@@ -44,7 +39,6 @@ export const StageComposition: React.FC<StageCompositionProps> = ({ variant }) =
     const liveActive = orderedSourceIds
       .map(id => sources.find(s => s.id === id))
       .filter((s): s is typeof sources[0] => s !== undefined && s.isActive !== false);
-    activeSources = liveActive;
     videoSources = liveActive.filter(s => ['camera', 'screen', 'media', 'rtmp'].includes(s.type));
     textOverlays = liveActive.filter(s => s.type === 'text-overlay');
     imageOverlays = liveActive.filter(s => s.type === 'image-overlay');
@@ -52,7 +46,6 @@ export const StageComposition: React.FC<StageCompositionProps> = ({ variant }) =
     lowerThirdSource = liveActive.find(s => s.type === 'lower-third');
     bgSource = liveActive.find(s => s.type === 'stage-background');
   } else {
-    activeSources = [];
     videoSources = [];
     textOverlays = [];
     imageOverlays = [];
@@ -247,7 +240,6 @@ export const StageComposition: React.FC<StageCompositionProps> = ({ variant }) =
     <div
       key={ov.id}
       data-source-id={ov.id}
-      data-source-type={ov.type === 'image-overlay' ? 'image' : 'animation'}
       className={`absolute ${positionClasses[ov.overlayPosition || 'center']} ${isDragging ? 'z-50' : 'z-20'} select-none`}
       style={{ opacity: ov.type === 'image-overlay' ? (ov.imageOpacity ?? 1) : (ov.animationOpacity ?? 1) }}
       onMouseDown={(e) => handleMouseDown(e, ov.id, ov.offsetX, ov.offsetY)}
@@ -262,7 +254,6 @@ export const StageComposition: React.FC<StageCompositionProps> = ({ variant }) =
         <div
           key={ov.id}
           data-source-id={ov.id}
-          data-source-type="text"
           className={`absolute ${positionClasses[ov.overlayPosition || 'bottom-left']} z-30 select-none`}
           onMouseDown={(e) => handleMouseDown(e, ov.id, ov.offsetX, ov.offsetY)}
           style={{ cursor: variant === 'preview' ? 'grab' : undefined,
@@ -313,7 +304,7 @@ export const StageComposition: React.FC<StageCompositionProps> = ({ variant }) =
     };
 
     return (
-      <div data-source-type="lower-third" className="absolute bottom-8 left-4 z-40">
+      <div className="absolute bottom-8 left-4 z-40">
         <div className={templateStyles[lt.template]}>
           <p className="text-white text-base font-bold">{lt.name}</p>
           {lt.title && (
@@ -329,7 +320,6 @@ export const StageComposition: React.FC<StageCompositionProps> = ({ variant }) =
   return (
     <div
       ref={containerRef}
-      data-variant={variant}
       className="relative w-full h-full overflow-hidden"
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}

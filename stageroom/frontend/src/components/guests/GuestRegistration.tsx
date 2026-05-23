@@ -1,6 +1,4 @@
 import { useState } from 'react';
-import { useAuthStore } from '../../hooks/useAuthStore';
-
 
 interface GuestRegistrationProps {
   eventId: string;
