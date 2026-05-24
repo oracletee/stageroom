@@ -126,9 +126,9 @@ export function useSceneGraph(): SceneLayer[] {
       );
       layers.push({
         sourceId: source.id,
-        type: 'image',
+        type: 'static-image',
         rect,
-        zIndex: 20,
+        zIndex: 10,
         opacity: source.imageOpacity ?? 1,
         imageUrl: source.imageUrl,
       });
@@ -146,7 +146,7 @@ export function useSceneGraph(): SceneLayer[] {
         sourceId: source.id,
         type: 'image',
         rect,
-        zIndex: 20,
+        zIndex: 50,
         opacity: source.animationOpacity ?? 1,
         animationUrl: source.animationUrl,
       });
@@ -168,7 +168,7 @@ export function useSceneGraph(): SceneLayer[] {
         sourceId: source.id,
         type: 'text',
         rect,
-        zIndex: 30,
+        zIndex: 20,
         opacity: 1,
         text,
         fontSize,
@@ -188,7 +188,7 @@ export function useSceneGraph(): SceneLayer[] {
           sourceId: lowerThirdSource.id,
           type: 'lower-third',
           rect: { x: 0.02, y: 0.85, width: 0.45, height: 0.1 },
-          zIndex: 40,
+          zIndex: 30,
           opacity: 1,
           ltName: lt.name,
           ltTitle: lt.title,

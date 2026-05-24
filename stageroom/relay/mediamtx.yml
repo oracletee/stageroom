@@ -1,0 +1,21 @@
+logLevel: info
+logDestinations: [stdout]
+
+rtsp: true
+rtspAddress: :8554
+
+rtmp: true
+rtmpAddress: :1935
+
+webrtc: true
+webrtcAddress: :8889
+webrtcLocalUDPAddress: :8189
+webrtcIPsFromInterfaces: true
+webrtcICEServers2:
+  - url: stun:stun.l.google.com:19302
+
+paths:
+  live:
+    source: publisher
+    runOnReady: ffmpeg -i rtsp://localhost:8554/live -c:v libx264 -preset veryfast -c:a aac -f flv rtmps://live.cloudflare.com:443/live/${CLOUDFLARE_STREAM_KEY}
+    runOnReadyRestart: false

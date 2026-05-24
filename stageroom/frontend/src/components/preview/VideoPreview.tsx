@@ -52,6 +52,8 @@ export const VideoPreview: React.FC = () => {
     ? scenes.find(s => s.id === programSnapshot.sceneId)?.name
     : undefined;
 
+  const RELAY_WHIP_URL = import.meta.env.VITE_RELAY_WHIP_URL || 'http://localhost:8889/whip/live';
+
   const handleGoLive = async () => {
     setWhipError(null);
     if (isStreaming) {
@@ -66,10 +68,15 @@ export const VideoPreview: React.FC = () => {
           console.error('Failed to stop stream:', err);
         }
       }
+      // Clear relay target
+      const relayTargetUrl = import.meta.env.VITE_RELAY_TARGET_URL || 'http://localhost:9990/target';
+      try {
+        await fetch(relayTargetUrl, { method: 'DELETE' });
+      } catch {}
       setStreaming(false);
       setStreamSession(null);
     } else {
-      if (!programSceneId) pushToProgram();
+      if (!programSceneId) await pushToProgram();
 
       try {
         const response = await fetch(`/api/stream/live-input`, {
@@ -87,12 +94,31 @@ export const VideoPreview: React.FC = () => {
         try { data = await response.json(); } catch {
           throw new Error('Invalid response from server');
         }
-        const whipUrl = data.webRTC?.url;
-        const whipToken = data.webRTC?.token;
-        const whepUrl = data.webRTCPlayback?.url;
-        console.log('[VideoPreview] Live input created:', data.uid, 'webRTC:', JSON.stringify(data.webRTC), 'webRTCPlayback:', JSON.stringify(data.webRTCPlayback));
 
-        setStreamSession({ liveInputUid: data.uid, whipUrl, whipToken, whepUrl, startedAt: new Date().toISOString() });
+        // Build Cloudflare RTMP target URL for recording
+        const rtmpBase = data.rtmps?.url || '';
+        const streamKey = data.rtmps?.streamKey || '';
+        const cloudflareRtmpUrl = rtmpBase && streamKey ? `${rtmpBase}${streamKey}` : '';
+
+        if (cloudflareRtmpUrl) {
+          const relayTargetUrl = import.meta.env.VITE_RELAY_TARGET_URL || 'http://localhost:9990/target';
+          try {
+            await fetch(relayTargetUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: cloudflareRtmpUrl }),
+            });
+          } catch (err) {
+            console.warn('[VideoPreview] Failed to set relay target:', err);
+          }
+        }
+
+        // Use local MediaMTX relay instead of direct Cloudflare WHIP
+        const whipUrl = RELAY_WHIP_URL;
+        const whepUrl = data.webRTCPlayback?.url;
+        console.log('[VideoPreview] Live input created:', data.uid, 'relay target RTMP:', cloudflareRtmpUrl ? 'set' : 'empty');
+
+        setStreamSession({ liveInputUid: data.uid, whipUrl, whipToken: '', whepUrl, startedAt: new Date().toISOString() });
         setStreaming(true);
       } catch (err: any) {
         console.error('Failed to start stream:', err);

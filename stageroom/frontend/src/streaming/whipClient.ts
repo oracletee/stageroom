@@ -24,9 +24,9 @@ export class WhipClient {
 
     this.pc = new RTCPeerConnection({
       iceServers: [
-        { urls: 'stun:stun.cloudflare.com:3478' },
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: import.meta.env.VITE_STUN_SERVER_1 || 'stun:stun.cloudflare.com:3478' },
+        { urls: import.meta.env.VITE_STUN_SERVER_2 || 'stun:stun.l.google.com:19302' },
+        { urls: import.meta.env.VITE_STUN_SERVER_3 || 'stun:stun1.l.google.com:19302' },
       ],
       bundlePolicy: 'max-bundle',
       rtcpMuxPolicy: 'require',
@@ -88,34 +88,11 @@ export class WhipClient {
 
     if (this.stopped) return;
 
-    // Try proxy WHIP POST through our worker first, fallback to direct
-    console.log('[WhipClient] Sending WHIP POST via proxy...', whipUrl.slice(0, 60));
     let answerSdp: string;
     let sessionUrl: string;
 
-    try {
-      const ac = new AbortController();
-      const proxyTimeout = setTimeout(() => ac.abort(), 15000);
-      const proxyRes = await fetch('/api/stream/whip-proxy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ whipUrl, sdp: offerSdp, whipToken }),
-        signal: ac.signal,
-      });
-      clearTimeout(proxyTimeout);
-
-      const proxyData = await proxyRes.json();
-      console.log('[WhipClient] Proxy response:', proxyData.status, proxyData.statusText);
-
-      if (!proxyRes.ok) {
-        throw new Error(proxyData.error || `Proxy returned ${proxyData.status}`);
-      }
-
-      answerSdp = proxyData.answerSdp;
-      sessionUrl = proxyData.sessionUrl || whipUrl;
-    } catch (proxyErr: any) {
-      console.warn('[WhipClient] Proxy failed, trying direct:', proxyErr.message);
-      // Fallback: direct WHIP POST (may fail CORS, but worth trying)
+    if (this.isLocalUrl(whipUrl)) {
+      console.log('[WhipClient] Local WHIP URL, sending directly:', whipUrl.slice(0, 60));
       const directRes = await fetch(whipUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/sdp' },
@@ -128,6 +105,44 @@ export class WhipClient {
       answerSdp = await directRes.text();
       sessionUrl = directRes.headers.get('location') || directRes.headers.get('Location') || whipUrl;
       console.log('[WhipClient] Direct WHIP response:', directRes.status, ', session:', sessionUrl.slice(0, 60));
+    } else {
+      // Try proxy WHIP POST through our worker first, fallback to direct
+      console.log('[WhipClient] Sending WHIP POST via proxy...', whipUrl.slice(0, 60));
+      try {
+        const ac = new AbortController();
+        const proxyTimeout = setTimeout(() => ac.abort(), 15000);
+        const proxyRes = await fetch('/api/stream/whip-proxy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ whipUrl, sdp: offerSdp, whipToken }),
+          signal: ac.signal,
+        });
+        clearTimeout(proxyTimeout);
+
+        const proxyData = await proxyRes.json();
+        console.log('[WhipClient] Proxy response:', proxyData.status, proxyData.statusText);
+
+        if (!proxyRes.ok) {
+          throw new Error(proxyData.error || `Proxy returned ${proxyData.status}`);
+        }
+
+        answerSdp = proxyData.answerSdp;
+        sessionUrl = proxyData.sessionUrl || whipUrl;
+      } catch (proxyErr: any) {
+        console.warn('[WhipClient] Proxy failed, trying direct:', proxyErr.message);
+        const directRes = await fetch(whipUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/sdp' },
+          body: offerSdp,
+        });
+        if (!directRes.ok) {
+          const errText = await directRes.text().catch(() => '');
+          throw new Error(`Direct WHIP returned ${directRes.status}: ${errText.substring(0, 200)}`);
+        }
+        answerSdp = await directRes.text();
+        sessionUrl = directRes.headers.get('location') || directRes.headers.get('Location') || whipUrl;
+        console.log('[WhipClient] Direct WHIP response:', directRes.status, ', session:', sessionUrl.slice(0, 60));
+      }
     }
 
     if (sessionUrl.startsWith('/')) {
@@ -170,15 +185,30 @@ export class WhipClient {
     this.pc.addEventListener('iceconnectionstatechange', disconnectHandler);
   }
 
-  private setupTrickleIce(): void {
-    if (!this.pc || !this.sessionUrl) return;
+  private isLocalUrl(url: string): boolean {
+    try {
+      const u = new URL(url);
+      return u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '::1';
+    } catch {
+      return false;
+    }
+  }
 
-    const handler = (e: RTCPeerConnectionIceEvent) => {
-      if (this.stopped || !this.sessionUrl) return;
-      if (e.candidate) {
-        console.log('[WhipClient] Trickling ICE candidate:', e.candidate.candidate.slice(0, 80));
-        const sdpFragment = `a=candidate:${e.candidate.candidate}\r\n`;
-        fetch('/api/stream/whip-proxy/trickle', {
+  private async trickleIce(sdpFragment: string): Promise<void> {
+    if (!this.sessionUrl) return;
+    if (this.isLocalUrl(this.sessionUrl)) {
+      try {
+        await fetch(this.sessionUrl, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/trickle-ice-sdpfrag' },
+          body: sdpFragment,
+        });
+      } catch (err) {
+        console.warn('[WhipClient] Direct trickle failed:', err);
+      }
+    } else {
+      try {
+        const r = await fetch('/api/stream/whip-proxy/trickle', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -186,20 +216,26 @@ export class WhipClient {
             sdpFragment,
             whipToken: this._token,
           }),
-        }).then(r => r.json().then(d => {
-          if (d.status !== 200) console.warn('[WhipClient] Trickle proxy failed:', d.status);
-        })).catch(err => console.warn('[WhipClient] Trickle proxy error:', err));
+        });
+        const d = await r.json();
+        if (d.status !== 200) console.warn('[WhipClient] Trickle proxy status:', d.status);
+      } catch (err) {
+        console.warn('[WhipClient] Trickle proxy error:', err);
+      }
+    }
+  }
+
+  private setupTrickleIce(): void {
+    if (!this.pc || !this.sessionUrl) return;
+
+    const handler = (e: RTCPeerConnectionIceEvent) => {
+      if (this.stopped || !this.sessionUrl) return;
+      if (e.candidate) {
+        console.log('[WhipClient] Trickling ICE candidate:', e.candidate.candidate.slice(0, 80));
+        this.trickleIce(`a=candidate:${e.candidate.candidate}\r\n`);
       } else {
         console.log('[WhipClient] ICE gathering complete');
-        fetch('/api/stream/whip-proxy/trickle', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionUrl: this.sessionUrl,
-            sdpFragment: 'a=end-of-candidates\r\n',
-            whipToken: this._token,
-          }),
-        }).catch(err => console.warn('[WhipClient] End-of-candidates proxy error:', err));
+        this.trickleIce('a=end-of-candidates\r\n');
       }
     };
     this._trickleHandler = handler;
@@ -256,28 +292,35 @@ export class WhipClient {
 
   private startKeepalive(): void {
     if (!this.sessionUrl || this._keepaliveInterval) return;
-    // Cloudflare WHIP servers timeout inactive sessions.
-     // Periodic PATCH requests keep the session alive.
      this._keepaliveInterval = setInterval(() => {
        if (this.stopped || !this.sessionUrl) return;
-       fetch('/api/stream/whip-proxy/trickle', {
-         method: 'POST',
-         headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({
-           sessionUrl: this.sessionUrl,
-           sdpFragment: 'a=candidate:0 1 UDP 2122252543 0.0.0.0 0 typ host\r\n',
-           whipToken: this._token,
-         }),
-       })
-         .then(response => {
-           if (!response.ok) {
-             console.warn('[WhipClient] Keepalive failed:', response.status, response.statusText);
-           }
+       const sdpFragment = 'a=candidate:0 1 UDP 2122252543 0.0.0.0 0 typ host\r\n';
+       if (this.isLocalUrl(this.sessionUrl)) {
+         fetch(this.sessionUrl, {
+           method: 'PATCH',
+           headers: { 'Content-Type': 'application/trickle-ice-sdpfrag' },
+           body: sdpFragment,
+         }).catch(err => console.warn('[WhipClient] Keepalive direct error:', err));
+       } else {
+         fetch('/api/stream/whip-proxy/trickle', {
+           method: 'POST',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({
+             sessionUrl: this.sessionUrl,
+             sdpFragment,
+             whipToken: this._token,
+           }),
          })
-         .catch(err => {
-           console.warn('[WhipClient] Keepalive error:', err);
-         });
-     }, 15000);
+           .then(response => {
+             if (!response.ok) {
+               console.warn('[WhipClient] Keepalive failed:', response.status, response.statusText);
+             }
+           })
+            .catch(err => {
+              console.warn('[WhipClient] Keepalive error:', err);
+            });
+        }
+      }, 15000);
 
      // Periodic encoder stats for debugging
      this._statsInterval = setInterval(() => {

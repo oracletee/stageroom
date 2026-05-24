@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react';
 import { useStreamStore } from '../hooks/useStreamStore';
 import { type SceneLayer } from './types';
 import { VideoElementCache } from './VideoElementCache';
+import { ImageCache } from './ImageCache';
+import { sourceVideoPool } from './SourceVideoPool';
 import { AudioMixer } from './AudioMixer';
 import { Canvas2DRenderer } from './Canvas2DRenderer';
 import { WhipClient } from '../streaming/whipClient';
@@ -40,8 +42,8 @@ export const ProgramCompositor: React.FC<ProgramCompositorProps> = ({
   const genRef = useRef(0);
 
   const layersRef = useRef<SceneLayer[]>([]);
-  const sourceElementsRef = useRef<Map<string, HTMLVideoElement | null>>(new Map());
   const videoCacheRef = useRef<VideoElementCache | null>(null);
+  const imageCacheRef = useRef<ImageCache | null>(null);
   const audioMixerRef = useRef<AudioMixer | null>(null);
   const rendererRef = useRef<Canvas2DRenderer | null>(null);
   const onErrorRef = useRef(onError);
@@ -68,11 +70,13 @@ export const ProgramCompositor: React.FC<ProgramCompositorProps> = ({
     let lastFrame = 0;
 
     const videoCache = new VideoElementCache();
+    const imageCache = new ImageCache();
     const audioMixer = new AudioMixer();
     audioMixer.resume().catch(() => {});
     const renderer = new Canvas2DRenderer();
 
     videoCacheRef.current = videoCache;
+    imageCacheRef.current = imageCache;
     audioMixerRef.current = audioMixer;
     rendererRef.current = renderer;
     renderer.init(canvas);
@@ -89,12 +93,6 @@ export const ProgramCompositor: React.FC<ProgramCompositorProps> = ({
 
     const unsubTracks = useStreamStore.subscribe(onStreamsChanged);
     onStreamsChanged();
-
-    const onElementsChanged = () => {
-      sourceElementsRef.current = useStreamStore.getState().sourceVideoElements;
-    };
-    const unsubElements = useStreamStore.subscribe(onElementsChanged);
-    onElementsChanged();
 
     let defaultBg = '#111827';
     let frameCount = 0;
@@ -141,7 +139,7 @@ export const ProgramCompositor: React.FC<ProgramCompositorProps> = ({
           case 'background':
             break;
           case 'video': {
-            const sourceEl = sourceElementsRef.current.get(layer.sourceId);
+            const sourceEl = sourceVideoPool.get(layer.sourceId);
             if (!sourceEl || sourceEl.readyState < 2 || !sourceEl.videoWidth) break;
             renderer.drawVideo(sourceEl, layer.rect, layer.opacity);
             videoPainted++;
@@ -158,6 +156,13 @@ export const ProgramCompositor: React.FC<ProgramCompositorProps> = ({
               if (videoEl.readyState >= 2) {
                 renderer.drawVideo(videoEl, layer.rect, layer.opacity);
               }
+            }
+            break;
+          }
+          case 'static-image': {
+            if (layer.imageUrl) {
+              const img = imageCache.get(layer.sourceId, layer.imageUrl);
+              if (img) renderer.drawImage(img, layer.rect, layer.opacity);
             }
             break;
           }
@@ -191,9 +196,9 @@ export const ProgramCompositor: React.FC<ProgramCompositorProps> = ({
      // Diagnostic logging every 30 frames (~1s)
        if (frameCount % 30 === 0) {
          const videoStates = layers.filter(l => l.type === 'video').map(l => {
-           const el = sourceElementsRef.current.get(l.sourceId);
-           return el ? `${l.sourceId.slice(0, 8)}:rs=${el.readyState},vw=${el.videoWidth},p=${el.paused}` : `${l.sourceId.slice(0, 8)}:no-el`;
-         });
+            const el = sourceVideoPool.get(l.sourceId);
+            return el ? `${l.sourceId.slice(0, 8)}:rs=${el.readyState},vw=${el.videoWidth},p=${el.paused}` : `${l.sourceId.slice(0, 8)}:no-el`;
+          });
            console.log('[Compositor] Frame stats', {
              frame: frameCount,
              layers: layers.length,
@@ -242,11 +247,10 @@ export const ProgramCompositor: React.FC<ProgramCompositorProps> = ({
       let pollCount = 0;
       while (performance.now() - start < maxWait) {
         const layers = layersRef.current;
-        const sourceElements = sourceElementsRef.current;
         pollCount++;
         for (const layer of layers) {
           if (layer.type === 'video') {
-            const el = sourceElements.get(layer.sourceId);
+            const el = sourceVideoPool.get(layer.sourceId);
             if (!el) {
               if (pollCount <= 5 || pollCount % 60 === 0) {
                 console.log('[Compositor] waitForVideoReady poll', {
@@ -349,8 +353,8 @@ await whip.start(whipUrl, stream, whipToken, handleWhipDisconnect);
         whipStartedRef.current = false;
         cancelAnimationFrame(rafRef.current);
         unsubTracks();
-        unsubElements();
         videoCache.destroy();
+        imageCache.destroy();
         audioMixer.destroy();
           whipRef.current?.stop();
           whipRef.current = null;

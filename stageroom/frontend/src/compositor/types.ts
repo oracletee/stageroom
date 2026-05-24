@@ -1,6 +1,6 @@
 export type Coord1D = number;
 
-export type SceneLayerType = 'video' | 'text' | 'image' | 'lower-third' | 'background';
+export type SceneLayerType = 'video' | 'text' | 'image' | 'lower-third' | 'background' | 'static-image';
 
 export interface NormalizedRect {
   x: Coord1D;

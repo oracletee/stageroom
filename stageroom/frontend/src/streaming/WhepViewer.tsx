@@ -13,7 +13,7 @@ export const WhepViewer: React.FC<WhepViewerProps> = ({ whepUrl }) => {
 
     const startWhep = async (): Promise<void> => {
       const pc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }],
+        iceServers: [{ urls: import.meta.env.VITE_STUN_SERVER_1 || 'stun:stun.cloudflare.com:3478' }],
         bundlePolicy: 'max-bundle',
         rtcpMuxPolicy: 'require',
       });

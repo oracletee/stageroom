@@ -36,7 +36,7 @@ export async function createLiveInput(
         profile,
         mode: 'automatic',
         lowLatency: true,
-        recording: { mode: 'off' },
+        recording: { mode: 'automatic' },
         webRTC: { enabled: true },
       }),
     }

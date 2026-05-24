@@ -5,6 +5,11 @@ interface ImportMetaEnv {
   readonly VITE_STREAM_PLAYBACK_DOMAIN: string;
   readonly VITE_LIVEKIT_URL: string;
   readonly VITE_LIVEKIT_TOKEN: string;
+  readonly VITE_RELAY_WHIP_URL: string;
+  readonly VITE_RELAY_TARGET_URL: string;
+  readonly VITE_STUN_SERVER_1: string;
+  readonly VITE_STUN_SERVER_2: string;
+  readonly VITE_STUN_SERVER_3: string;
 }
 
 interface ImportMeta {
