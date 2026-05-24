@@ -40,14 +40,15 @@ const SourcesTab: React.FC = () => {
   const {
     sources, addSource, removeSource,
     addSourceToScene, removeSourceFromScene,
+    videoDevices, audioDevices, fetchDevices,
   } = useStreamStore();
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [expandedSourceId, setExpandedSourceId] = useState<string | null>(null);
-  const [sourceType, setSourceType] = useState<'camera' | 'screen' | 'media' | 'ndi' | 'rtmp' | 'text-overlay' | 'image-overlay' | 'animated-overlay' | 'lower-third' | 'stage-background'>('camera');
+  const [sourceType, setSourceType] = useState<'camera' | 'screen' | 'media' | 'rtmp' | 'text-overlay' | 'image-overlay' | 'animated-overlay' | 'lower-third' | 'stage-background'>('camera');
   const [sourceLabel, setSourceLabel] = useState('');
-  const [ndiSourceName, setNdiSourceName] = useState('');
-  const [ndiAddress, setNdiAddress] = useState('');
+  const [cameraDeviceId, setCameraDeviceId] = useState('');
+  const [cameraAudioInputId, setCameraAudioInputId] = useState('');
   const [rtmpLoading, setRtmpLoading] = useState(false);
   const [rtmpError, setRtmpError] = useState('');
   const [rtmpCreatedData, setRtmpCreatedData] = useState<{ uid: string; url: string; streamKey: string; playbackUrl: string } | null>(null);
@@ -103,11 +104,14 @@ const SourcesTab: React.FC = () => {
 
         const data = await response.json();
         console.log('Cloudflare live input response:', data);
+        const whepUrl = data.webRTCPlayback?.url || '';
+        const whepMatch = whepUrl.match(/^(https:\/\/[^/]+)\//);
+        const hlsBase = whepMatch?.[1] || `https://customer-${data.uid.slice(0, 8)}.cloudflarestream.com`;
         setRtmpCreatedData({
           uid: data.uid,
           url: data.rtmps?.url || data.url,
           streamKey: data.rtmps?.streamKey || data.streamKey,
-          playbackUrl: `https://cloudflarestream.com/${data.uid}/manifest/video.m3u8`,
+          playbackUrl: `${hlsBase}/${data.uid}/manifest/video.m3u8`,
         });
         setRtmpLoading(false);
         return;
@@ -125,7 +129,7 @@ const SourcesTab: React.FC = () => {
       label: sourceLabel || `${st.charAt(0).toUpperCase() + st.slice(1)} ${Date.now()}`,
       previewUrl: st === 'media' ? mediaFileUrl : '',
       isActive: true,
-      ...(st === 'ndi' ? { ndiSourceName, ndiAddress } : {}),
+      ...(st === 'camera' ? { deviceId: cameraDeviceId || undefined, audioInputId: cameraAudioInputId || undefined } : {}),
       ...(st === 'text-overlay' ? {
         overlayText,
         overlayFontSize,
@@ -141,8 +145,8 @@ const SourcesTab: React.FC = () => {
     addSource(newSource);
     setShowAddModal(false);
     setSourceLabel('');
-    setNdiSourceName('');
-    setNdiAddress('');
+    setCameraDeviceId('');
+    setCameraAudioInputId('');
     setRtmpError('');
     setMediaFileUrl('');
     setOverlayText('');
@@ -385,25 +389,33 @@ const SourcesTab: React.FC = () => {
                     </>
                   )}
 
-                  {source.type === 'ndi' && (
-                    <>
+                  {source.type === 'camera' && (
+                    <div className="space-y-1">
                       <div>
-                        <label className="block text-xs text-gray-400 mb-0.5">NDI Source Name</label>
-                        <input value={source.ndiSourceName || ''} onChange={e => {
-                          useStreamStore.getState().updateSourceField(source.id, 'ndiSourceName', e.target.value);
+                        <label className="block text-xs text-gray-400 mb-0.5">Camera:</label>
+                        <select value={source.deviceId || ''} onChange={e => {
+                          useStreamStore.getState().updateSourceField(source.id, 'deviceId', e.target.value || undefined);
                         }}
-                          placeholder="NDI source name"
-                          className="w-full px-2 py-1 bg-gray-700 text-white rounded text-xs" />
+                          className="w-full px-2 py-1 bg-gray-700 text-white rounded text-xs">
+                          <option value="">System default</option>
+                          {videoDevices.map(d => (
+                            <option key={d.deviceId} value={d.deviceId}>{d.label || d.deviceId.slice(0, 16)}</option>
+                          ))}
+                        </select>
                       </div>
                       <div>
-                        <label className="block text-xs text-gray-400 mb-0.5">NDI Address</label>
-                        <input value={source.ndiAddress || ''} onChange={e => {
-                          useStreamStore.getState().updateSourceField(source.id, 'ndiAddress', e.target.value);
+                        <label className="block text-xs text-gray-400 mb-0.5">Microphone:</label>
+                        <select value={source.audioInputId || ''} onChange={e => {
+                          useStreamStore.getState().updateSourceField(source.id, 'audioInputId', e.target.value || undefined);
                         }}
-                          placeholder="e.g. 192.168.1.100"
-                          className="w-full px-2 py-1 bg-gray-700 text-white rounded text-xs" />
+                          className="w-full px-2 py-1 bg-gray-700 text-white rounded text-xs">
+                          <option value="">System default</option>
+                          {audioDevices.map(d => (
+                            <option key={d.deviceId} value={d.deviceId}>{d.label || d.deviceId.slice(0, 16)}</option>
+                          ))}
+                        </select>
                       </div>
-                    </>
+                    </div>
                   )}
 
                   {source.type === 'media' && (
@@ -645,7 +657,7 @@ const SourcesTab: React.FC = () => {
                     if (!sourceLabel) {
                       setSourceLabel(`${t.charAt(0).toUpperCase() + t.slice(1)} ${Date.now()}`);
                     }
-                    if (t !== 'ndi') { setNdiSourceName(''); setNdiAddress(''); }
+                    if (t !== 'camera') { setCameraDeviceId(''); setCameraAudioInputId(''); }
                     if (t !== 'rtmp') { setRtmpCreatedData(null); }
                     if (t !== 'media') setMediaFileUrl('');
                     if (t !== 'text-overlay') { setOverlayText(''); setOverlayFontSize('medium'); setOverlayTextColor('#ffffff'); setOverlayBackgroundColor('transparent'); setOverlayPosition('bottom-left'); }
@@ -659,7 +671,6 @@ const SourcesTab: React.FC = () => {
                   <option value="camera">Camera / Webcam</option>
                   <option value="screen">Screen Share</option>
                   <option value="media">Media File</option>
-                  <option value="ndi">NDI Source</option>
                   <option value="rtmp">RTMP Ingest</option>
                   <option value="text-overlay">Text Overlay</option>
                   <option value="image-overlay">Image Overlay</option>
@@ -669,19 +680,33 @@ const SourcesTab: React.FC = () => {
                 </select>
               </div>
 
-              {sourceType === 'ndi' && (
-                <>
+              {sourceType === 'camera' && (
+                <div className="space-y-2">
                   <div>
-                    <label className="block text-sm text-gray-300 mb-1">NDI Source Name:</label>
-                    <input value={ndiSourceName} onChange={e => setNdiSourceName(e.target.value)}
-                      placeholder="NDI source name" className="w-full px-3 py-2 bg-gray-700 text-white rounded" />
+                    <label className="block text-sm text-gray-300 mb-1">Camera:</label>
+                    <select value={cameraDeviceId} onChange={e => setCameraDeviceId(e.target.value)}
+                      className="w-full px-3 py-2 bg-gray-700 text-white rounded">
+                      <option value="">System default</option>
+                      {videoDevices.map(d => (
+                        <option key={d.deviceId} value={d.deviceId}>{d.label || d.deviceId.slice(0, 16)}</option>
+                      ))}
+                    </select>
                   </div>
                   <div>
-                    <label className="block text-sm text-gray-300 mb-1">NDI Address:</label>
-                    <input value={ndiAddress} onChange={e => setNdiAddress(e.target.value)}
-                      placeholder="e.g. 192.168.1.100" className="w-full px-3 py-2 bg-gray-700 text-white rounded" />
+                    <label className="block text-sm text-gray-300 mb-1">Microphone:</label>
+                    <select value={cameraAudioInputId} onChange={e => setCameraAudioInputId(e.target.value)}
+                      className="w-full px-3 py-2 bg-gray-700 text-white rounded">
+                      <option value="">System default</option>
+                      {audioDevices.map(d => (
+                        <option key={d.deviceId} value={d.deviceId}>{d.label || d.deviceId.slice(0, 16)}</option>
+                      ))}
+                    </select>
                   </div>
-                </>
+                  <button onClick={fetchDevices}
+                    className="text-xs text-blue-400 hover:text-blue-300 underline">
+                    Refresh devices
+                  </button>
+                </div>
               )}
 
               {sourceType === 'rtmp' && !rtmpCreatedData && (

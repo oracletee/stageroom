@@ -58,6 +58,7 @@ function AppContent() {
       if (data && (data.scenes?.length || data.sources?.length)) {
         useStreamStore.getState().loadFromDb(data);
         useStreamStore.getState().backfillRtmpSources();
+        useStreamStore.getState().fetchDevices();
       } else {
         const defaultSceneId = `scene_${Date.now()}`;
         await useStreamStore.getState().addScene('Scene 1', defaultSceneId);

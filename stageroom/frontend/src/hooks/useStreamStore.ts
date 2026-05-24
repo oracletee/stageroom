@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import * as studioApi from '../api/studio';
+import { sourceVideoPool } from '../compositor/SourceVideoPool';
 
 export type StageMode = 'ted-talk' | 'podcast' | 'event' | 'worship' | 'classroom' | 'debate' | 'film-premiere';
 export type AppView = 'host' | 'viewer' | 'dashboard' | 'events';
@@ -12,6 +13,8 @@ export interface SourceItem {
   isActive: boolean;
   ndiSourceName?: string;
   ndiAddress?: string;
+  deviceId?: string;
+  audioInputId?: string;
   rtmpUrl?: string;
   rtmpStreamKey?: string;
   uid?: string;
@@ -68,6 +71,7 @@ interface StreamState {
   setSelectedVideoDevice: (deviceId: string | null) => void;
   selectedAudioDevice: string | null;
   setSelectedAudioDevice: (deviceId: string | null) => void;
+  fetchDevices: () => Promise<void>;
   sources: SourceItem[];
   setSources: (sources: SourceItem[]) => void;
   addSource: (source: SourceItem) => void;
@@ -77,8 +81,6 @@ interface StreamState {
   updateSourceField: (sourceId: string, field: string, value: any) => void;
   sourceStreams: Map<string, MediaStream>;
   setSourceStream: (sourceId: string, stream: MediaStream | null) => void;
-  sourceVideoElements: Map<string, HTMLVideoElement | null>;
-  setSourceVideoElement: (sourceId: string, el: HTMLVideoElement | null) => void;
   scenes: Scene[];
   selectedSceneId: string | null;
   programSceneId: string | null;
@@ -132,6 +134,8 @@ function parseDbSource(row: any): SourceItem {
     isActive: row.is_active !== 0,
     ndiSourceName: config.ndiSourceName,
     ndiAddress: config.ndiAddress,
+    deviceId: config.deviceId,
+    audioInputId: config.audioInputId,
     rtmpUrl: config.rtmpUrl,
     rtmpStreamKey: config.rtmpStreamKey,
     uid: row.live_input_uid,
@@ -176,11 +180,21 @@ export const useStreamStore = create<StreamState>((set, get) => ({
   setSelectedVideoDevice: (deviceId) => set({ selectedVideoDevice: deviceId }),
   selectedAudioDevice: null,
   setSelectedAudioDevice: (deviceId) => set({ selectedAudioDevice: deviceId }),
+  fetchDevices: async () => {
+    try {
+      const allDevices = await navigator.mediaDevices.enumerateDevices();
+      set({
+        videoDevices: allDevices.filter(d => d.kind === 'videoinput'),
+        audioDevices: allDevices.filter(d => d.kind === 'audioinput'),
+      });
+    } catch {
+      // ignore enumeration errors
+    }
+  },
   sources: [],
   setSources: (sources) => set({ sources }),
   addSource: async (source) => {
-    set((state) => ({ sources: [...state.sources, source] }));
-    await studioApi.createSource({
+    const saved = await studioApi.createSource({
       id: source.id,
       type: source.type,
       label: source.label,
@@ -189,6 +203,8 @@ export const useStreamStore = create<StreamState>((set, get) => ({
         previewUrl: source.previewUrl,
         ndiSourceName: source.ndiSourceName,
         ndiAddress: source.ndiAddress,
+        deviceId: source.deviceId,
+        audioInputId: source.audioInputId,
         rtmpUrl: source.rtmpUrl,
         rtmpStreamKey: source.rtmpStreamKey,
         token: source.token,
@@ -215,8 +231,24 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       playbackUrl: source.playbackUrl,
       isActive: source.isActive,
     });
+    if (!saved) return;
+    set((state) => {
+      const sceneId = get().selectedSceneId;
+      return {
+        sources: [...state.sources, { ...source, id: saved.id }],
+        scenes: sceneId
+          ? state.scenes.map(s =>
+              s.id === sceneId && !s.sourceIds.includes(saved.id)
+                ? { ...s, sourceIds: [...s.sourceIds, saved.id] }
+                : s
+            )
+          : state.scenes,
+      };
+    });
   },
   removeSource: async (sourceId) => {
+    await studioApi.deleteSource(sourceId);
+    sourceVideoPool.remove(sourceId);
     const stream = get().sourceStreams.get(sourceId);
     if (stream) {
       stream.getTracks().forEach(t => t.stop());
@@ -233,24 +265,23 @@ export const useStreamStore = create<StreamState>((set, get) => ({
         return next;
       })(),
     }));
-    await studioApi.deleteSource(sourceId);
   },
   toggleSourceActive: async (sourceId) => {
     const source = get().sources.find(s => s.id === sourceId);
     if (!source) return;
     const newActive = !source.isActive;
+    await studioApi.updateSource(sourceId, { isActive: newActive });
     set((state) => ({
       sources: state.sources.map(s =>
         s.id === sourceId ? { ...s, isActive: newActive } : s
       )
     }));
-    await studioApi.updateSource(sourceId, { isActive: newActive });
   },
   updateSource: async (sourceId, updates) => {
-    set((state) => ({
-      sources: state.sources.map(s => s.id === sourceId ? { ...s, ...updates } : s),
-    }));
     await studioApi.updateSource(sourceId, updates);
+    set((state) => ({
+      sources: state.sources.map(s => sourceId === s.id ? { ...s, ...updates } : s),
+    }));
   },
   updateSourceField: (sourceId, field, value) => {
     const state = get();
@@ -264,7 +295,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     if (field === 'label') {
       studioApi.updateSource(sourceId, { label: value });
     } else {
-      const configFields: (keyof SourceItem)[] = ['previewUrl', 'ndiSourceName', 'ndiAddress', 'rtmpUrl', 'rtmpStreamKey', 'token', 'overlayText', 'overlayFontSize', 'overlayTextColor', 'overlayBackgroundColor', 'overlayPosition', 'offsetX', 'offsetY', 'ltName', 'ltTitle', 'ltTemplate', 'ltVisible', 'bgColor', 'imageUrl', 'imageOpacity', 'imageScale', 'animationUrl', 'animationOpacity', 'animationScale'];
+        const configFields: (keyof SourceItem)[] = ['previewUrl', 'ndiSourceName', 'ndiAddress', 'deviceId', 'audioInputId', 'rtmpUrl', 'rtmpStreamKey', 'token', 'overlayText', 'overlayFontSize', 'overlayTextColor', 'overlayBackgroundColor', 'overlayPosition', 'offsetX', 'offsetY', 'ltName', 'ltTitle', 'ltTemplate', 'ltVisible', 'bgColor', 'imageUrl', 'imageOpacity', 'imageScale', 'animationUrl', 'animationOpacity', 'animationScale'];
       const config: Record<string, any> = {};
       for (const f of configFields) {
         const v = (updatedSource as any)[f];
@@ -279,13 +310,6 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     if (stream) next.set(sourceId, stream);
     else next.delete(sourceId);
     return { sourceStreams: next };
-  }),
-  sourceVideoElements: new Map(),
-  setSourceVideoElement: (sourceId, el) => set((state) => {
-    const next = new Map(state.sourceVideoElements);
-    if (el) next.set(sourceId, el);
-    else next.delete(sourceId);
-    return { sourceVideoElements: next };
   }),
   scenes: [],
   selectedSceneId: null,
@@ -325,49 +349,56 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     set({ selectedSceneId: sceneId });
     get().persistConfig();
   },
-  pushToProgram: () => {
-    set((state) => {
-      const scene = state.scenes.find(s => s.id === state.selectedSceneId);
-      if (!scene) return {};
-      const snapshotSources = scene.sourceIds
-        .map(id => state.sources.find(s => s.id === id))
-        .filter((s): s is SourceItem => s !== undefined);
-      return {
-        programSceneId: state.selectedSceneId,
-        programSnapshot: {
-          sceneId: scene.id,
-          timestamp: Date.now(),
-          sources: structuredClone(snapshotSources),
-        },
-      };
+  pushToProgram: async () => {
+    const state = get();
+    const scene = state.scenes.find(s => s.id === state.selectedSceneId);
+    if (!scene) return;
+    const snapshotSources = scene.sourceIds
+      .map(id => state.sources.find(s => s.id === id))
+      .filter((s): s is SourceItem => s !== undefined);
+    const snapshot = {
+      programSceneId: state.selectedSceneId,
+      programSnapshot: {
+        sceneId: scene.id,
+        timestamp: Date.now(),
+        sources: structuredClone(snapshotSources),
+      },
+    };
+    // Persist to DB first, then update zustand
+    await studioApi.saveStudioConfig({
+      selectedSceneId: snapshot.programSceneId,
+      programSceneId: snapshot.programSceneId,
+      programSnapshot: snapshot.programSnapshot,
+      stageMode: state.stageMode,
+      backstageParticipants: JSON.stringify(state.backstageParticipants),
+      spotlightParticipants: JSON.stringify(state.spotlightParticipants),
+      setupDone: state.setupDone,
     });
-    get().persistConfig();
+    set(snapshot);
   },
   addSourceToScene: async (sceneId, sourceId) => {
-    set((state) => ({
-      scenes: state.scenes.map(s =>
-        s.id === sceneId && !s.sourceIds.includes(sourceId)
-          ? { ...s, sourceIds: [...s.sourceIds, sourceId] }
-          : s
-      ),
-    }));
-    const scene = get().scenes.find(s => s.id === sceneId);
+    const newScenes = get().scenes.map(s =>
+      s.id === sceneId && !s.sourceIds.includes(sourceId)
+        ? { ...s, sourceIds: [...s.sourceIds, sourceId] }
+        : s
+    );
+    const scene = newScenes.find(s => s.id === sceneId);
     if (scene) {
-      await studioApi.updateScene(sceneId, { sourceIds: [...scene.sourceIds, sourceId] });
+      await studioApi.updateScene(sceneId, { sourceIds: scene.sourceIds });
     }
+    set({ scenes: newScenes });
   },
   removeSourceFromScene: async (sceneId, sourceId) => {
-    set((state) => ({
-      scenes: state.scenes.map(s =>
-        s.id === sceneId
-          ? { ...s, sourceIds: s.sourceIds.filter(id => id !== sourceId) }
-          : s
-      ),
-    }));
-    const scene = get().scenes.find(s => s.id === sceneId);
+    const newScenes = get().scenes.map(s =>
+      s.id === sceneId
+        ? { ...s, sourceIds: s.sourceIds.filter(id => id !== sourceId) }
+        : s
+    );
+    const scene = newScenes.find(s => s.id === sceneId);
     if (scene) {
-      await studioApi.updateScene(sceneId, { sourceIds: scene.sourceIds.filter(id => id !== sourceId) });
+      await studioApi.updateScene(sceneId, { sourceIds: scene.sourceIds });
     }
+    set({ scenes: newScenes });
   },
   setStreaming: (value) => set({ isStreaming: value }),
   stageMode: 'ted-talk',
@@ -471,20 +502,27 @@ export const useStreamStore = create<StreamState>((set, get) => ({
         const data = await res.json();
         const rtmpUrl: string = data.rtmps?.url || '';
         const rtmpStreamKey: string = data.rtmps?.streamKey || '';
+        const webRTCPlaybackUrl: string = data.webRTCPlayback?.url || '';
+        const uid: string = data.uid || source.uid;
+        const customerDomain = webRTCPlaybackUrl
+          ? webRTCPlaybackUrl.split('/')[2]
+          : `customer-${import.meta.env.VITE_CLOUDFLARE_ACCOUNT_ID || 'unknown'}.cloudflarestream.com`;
+        const hlsPlaybackUrl = `https://${customerDomain}/${uid}/manifest/video.m3u8`;
         if (!rtmpUrl || !rtmpStreamKey) continue;
-        set((state) => ({
-          sources: state.sources.map(s =>
-            s.id === source.id ? { ...s, rtmpUrl, rtmpStreamKey } : s
-          ),
-        }));
-        const configFields: (keyof SourceItem)[] = ['previewUrl', 'ndiSourceName', 'ndiAddress', 'rtmpUrl', 'rtmpStreamKey', 'token', 'overlayText', 'overlayFontSize', 'overlayTextColor', 'overlayBackgroundColor', 'overlayPosition', 'offsetX', 'offsetY', 'ltName', 'ltTitle', 'ltTemplate', 'ltVisible', 'bgColor', 'imageUrl', 'imageOpacity', 'imageScale', 'animationUrl', 'animationOpacity', 'animationScale'];
+      const configFields: (keyof SourceItem)[] = ['previewUrl', 'ndiSourceName', 'ndiAddress', 'deviceId', 'audioInputId', 'rtmpUrl', 'rtmpStreamKey', 'token', 'overlayText', 'overlayFontSize', 'overlayTextColor', 'overlayBackgroundColor', 'overlayPosition', 'offsetX', 'offsetY', 'ltName', 'ltTitle', 'ltTemplate', 'ltVisible', 'bgColor', 'imageUrl', 'imageOpacity', 'imageScale', 'animationUrl', 'animationOpacity', 'animationScale'];
         const config: Record<string, any> = {};
-        const updated = get().sources.find(s => s.id === source.id)!;
         for (const f of configFields) {
-          const v = (updated as any)[f];
+          const v = (source as any)[f];
           if (v !== undefined) config[f] = v;
         }
-        await studioApi.updateSource(source.id, { config });
+        config.rtmpUrl = rtmpUrl;
+        config.rtmpStreamKey = rtmpStreamKey;
+        await studioApi.updateSource(source.id, { config, playbackUrl: hlsPlaybackUrl });
+        set((state) => ({
+          sources: state.sources.map(s =>
+            s.id === source.id ? { ...s, rtmpUrl, rtmpStreamKey, playbackUrl: hlsPlaybackUrl } : s
+          ),
+        }));
       } catch (e) {
         console.warn('Failed to backfill RTMP source', source.id, e);
       }
